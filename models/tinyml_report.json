@@ -1,0 +1,8 @@
+{
+  "raw_size_kb": 706.248046875,
+  "onnx_size_kb": 0.0517578125,
+  "compression_percent": 99.99267143990996,
+  "latency_ms": 0.5011358000047039,
+  "onnx_latency_ms": 0.21047703600197565,
+  "status": "PASS"
+}

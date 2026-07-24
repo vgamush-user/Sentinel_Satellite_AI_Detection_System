@@ -1,4 +1,23 @@
-crewai==1.15.5
-crewai-tools==1.15.5
-litellm==1.91.4
-python-dotenv
+# ── Core ML ──────────────────────────────────────────────
+pandas>=2.0
+numpy>=1.26
+scikit-learn>=1.4
+xgboost>=2.0
+shap>=0.45
+
+# ── Deep Learning ─────────────────────────────────────────
+torch>=2.2
+
+# ── Agents & LLM ─────────────────────────────────────────
+crewai>=0.28
+groq>=0.9
+
+# ── Vector DB (SPARTA RAG) ────────────────────────────────
+chromadb>=0.5
+
+# ── Dashboard ─────────────────────────────────────────────
+gradio>=4.0
+
+# ── Utilities ─────────────────────────────────────────────
+rich>=13.0          # pretty terminal output for the simulator
+python-dotenv>=1.0  # manage API keys via .env file

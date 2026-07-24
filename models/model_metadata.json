@@ -1,0 +1,21 @@
+{
+  "features": [
+    "MemoryAnonMB",
+    "MemoryShmemMB",
+    "MemoryFileMB",
+    "UniqueMessageIDsInWindow",
+    "SlidingWindowMaxIntervalSec",
+    "SlidingWindowMinIntervalSec",
+    "MsgCount",
+    "TimeRadians"
+  ],
+  "labels": {
+    "0": "Normal",
+    "1": "Storage Exhaustion",
+    "2": "Command Flooding",
+    "3": "Data Injection",
+    "4": "Defence Impairment"
+  },
+  "accuracy": 0.968,
+  "macro_f1": 0.9679799874921826
+}

@@ -1,4 +1,23 @@
-.env
-.venv/
+# Python & virtual envs
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Data & Database artifacts (large/local binaries)
+data/*.csv
+!data/.gitkeep
+sparta_kb/chroma_db/
+
+# Generated logs & reports
+reports/incident_log.json
+*.log
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
