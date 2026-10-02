@@ -42,7 +42,13 @@ from pipeline.full_pipeline import run_pipeline_for_window
 # not a real result (see SentinelSat_6_Week_Plan). Demoing against raw data
 # would misleadingly look near-perfect. Switch the CSV path field below if
 # you specifically want to inspect the raw stream instead.
-DEFAULT_CSV = str(PROJECT_ROOT / "data" / "noised" / "noised_dataset.csv")
+DATASETS = {
+    "Noised telemetry (recommended)": PROJECT_ROOT / "data" / "noised" / "noised_dataset.csv",
+    "Raw simulated telemetry": PROJECT_ROOT / "data" / "raw" / "consolidated_dataset_raw.csv",
+}
+DEFAULT_DATASET = "Noised telemetry (recommended)"
+DEFAULT_CSV = str(DATASETS[DEFAULT_DATASET])
+ON_HF_SPACE = bool(os.environ.get("SPACE_ID"))
 PLOT_HISTORY = 300  # points kept for the rolling charts
 
 DEMO_CACHE_PATH = PROJECT_ROOT / "src" / "pipeline" / "demo_cache.json"
@@ -69,13 +75,19 @@ sim = TelemetryReplaySimulator(DEFAULT_CSV, buffer_size=100)
 plot_history: deque = deque(maxlen=PLOT_HISTORY)
 
 
-def do_load_csv(path: str):
+def do_load_csv(name: str):
     global sim, plot_history
+    path = DATASETS.get(name)
+    if path is None:  # nothing outside the allow-list can be loaded
+        return "Unknown dataset."
     try:
-        sim = TelemetryReplaySimulator(path.strip() or DEFAULT_CSV, buffer_size=100)
+        sim = TelemetryReplaySimulator(str(path), buffer_size=100)
         plot_history = deque(maxlen=PLOT_HISTORY)
+        return f"Loaded **{name}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
     except Exception as e:
-        return f"Failed to load CSV: {e}"
+        # Full detail (which includes the file path) goes to server logs only.
+        print(f"[dashboard] failed to load {path}: {e}")
+        return f"Couldn't load **{name}**. Check the server logs."
 
 
 def do_start(speed, order_mode, loop, buffer_size):
@@ -231,10 +243,13 @@ with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
         "or agent logic is applied here yet."
     )
 
-    with gr.Row():
-        csv_path = gr.Textbox(value=DEFAULT_CSV, label="CSV path", scale=3)
-        load_btn = gr.Button("Load CSV", scale=1)
-    load_status = gr.Markdown(f"Loaded `{DEFAULT_CSV}` — {sim.total_rows:,} rows, {len(sim.df.columns)} columns.")
+    with gr.Accordion("Dataset", open=False, visible=not ON_HF_SPACE):
+        with gr.Row():
+            dataset = gr.Dropdown(list(DATASETS), value=DEFAULT_DATASET, label="Telemetry dataset", scale=3)
+            load_btn = gr.Button("Load", scale=1)
+    load_status = gr.Markdown(
+        f"Loaded **{DEFAULT_DATASET}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
+    )
 
     with gr.Row():
         speed = gr.Slider(1, 200, value=10, step=1, label="Speed (rows / sec)")
@@ -284,7 +299,7 @@ with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
         demo_buttons = [gr.Button(name) for name in DEMO_CLASS_NAMES]
 
     # --- wiring ---
-    load_btn.click(do_load_csv, inputs=[csv_path], outputs=[load_status])
+    load_btn.click(do_load_csv, inputs=[dataset], outputs=[load_status])
 
     start_btn.click(do_start, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
     pause_btn.click(do_pause, inputs=[], outputs=[])
