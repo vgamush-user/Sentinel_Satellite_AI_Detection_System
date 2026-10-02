@@ -74,7 +74,6 @@ def do_load_csv(path: str):
     try:
         sim = TelemetryReplaySimulator(path.strip() or DEFAULT_CSV, buffer_size=100)
         plot_history = deque(maxlen=PLOT_HISTORY)
-        return f"Loaded `{sim.csv_path}` — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
     except Exception as e:
         return f"Failed to load CSV: {e}"
 
