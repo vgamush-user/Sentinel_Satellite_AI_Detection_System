@@ -1,6 +1,6 @@
 """
-dashboard_app.py
------------------
+app.py
+------
 Gradio dashboard for the Telemetry-Replay Simulator (v1).
 
 Connects to TelemetryReplaySimulator and visualizes the live stream:
@@ -12,7 +12,7 @@ app interprets or acts on it.
 
 Run:
     pip install -r requirements.txt
-    python dashboard_app.py
+    python src/dashboard/app.py
 
 Then open the printed local URL in your browser.
 """
@@ -130,6 +130,13 @@ def do_run_agent_pipeline():
     run costs 4 Groq calls, so this is a click-to-run "demo mode" action,
     matching the project's cost-aware design (don't call the LLM on every
     packet, and don't burn a reviewer's Groq quota without them asking)."""
+    if not os.environ.get("GROQ_API_KEY"):
+        return (
+            "Live analysis is unavailable: `GROQ_API_KEY` is not configured on this server. "
+            "Use the Demo Mode buttons below for cached examples.",
+            "",
+        )
+
     snap = sim.snapshot()
     if snap.last_row is None:
         return "No rows streamed yet — start the simulator first.", ""
@@ -137,18 +144,20 @@ def do_run_agent_pipeline():
     row = snap.last_row
     window = {f: float(row[f]) for f in FEATURE_ORDER if f in row.index}
     true_label = int(row["Label"]) if "Label" in row.index else None
-    would_escalate = should_escalate(window)
+    monitor_note = (
+        ""
+        if should_escalate(window)
+        else "Monitor Agent: nominal window (would **not** normally escalate) — ran anyway since you asked.  \n"
+    )
 
-    if not would_escalate:
-        return (
-            f"Monitor Agent: this window looks nominal (would **not** normally escalate). "
-            f"True label in data: {true_label}. Running full analysis anyway since you asked.",
-            "",
-        )
+    try:
+        result = run_pipeline_for_window(window)
+    except Exception as e:
+        print(f"[dashboard] agent pipeline failed: {e!r}")
+        return "**Status:** ERROR — the agent pipeline failed. Check the server logs.", ""
 
-    result = run_pipeline_for_window(window)
     classification = result["classification"]
-    header = (
+    header = monitor_note + (
         f"**Status:** {result['status']}  |  "
         f"**Detected:** {classification.predicted_class if classification else 'ERROR'}  |  "
         f"**Confidence:** {classification.confidence if classification else 'N/A'}  |  "
@@ -165,7 +174,7 @@ def do_show_demo_example(class_name: str):
     if not DEMO_CACHE_PATH.exists():
         return "No demo cache found yet -- run `python src/pipeline/generate_demo_cache.py` first.", ""
 
-    cache = json.loads(DEMO_CACHE_PATH.read_text())
+    cache = json.loads(DEMO_CACHE_PATH.read_text(encoding="utf-8"))
     if class_name not in cache:
         return f"'{class_name}' not cached yet (cache generation may still be running).", ""
 

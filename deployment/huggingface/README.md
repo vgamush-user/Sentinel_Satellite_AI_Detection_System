@@ -4,6 +4,7 @@ emoji: 🛰️
 colorFrom: blue
 colorTo: indigo
 sdk: gradio
+sdk_version: 6.31.0
 app_file: deployment/huggingface/space_app.py
 pinned: false
 license: mit

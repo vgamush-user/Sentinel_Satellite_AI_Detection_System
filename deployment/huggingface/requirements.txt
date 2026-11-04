@@ -21,7 +21,7 @@ pandas
 xgboost
 scikit-learn
 chromadb
-gradio>=5.0
+gradio==6.31.0  # keep in sync with sdk_version in deployment/huggingface/README.md
 
 # Required only because this Space is currently assigned ZeroGPU hardware
 # (Hugging Face free-tier dynamic-GPU pool). This app does no local GPU

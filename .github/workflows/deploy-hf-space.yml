@@ -25,9 +25,9 @@ jobs:
   verify-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -52,9 +52,11 @@ jobs:
           HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO }}
         run: |
           set -e
-          if [ -z "${HF_SPACE_REPO}" ]; then
-            echo "HF_SPACE_REPO repo variable is not set -- see this file's header comment. Skipping push."
-            exit 1
+          # Forks (and any repo without deploy settings) verify only -- they
+          # have no write access to the Space, so this is a skip, not a failure.
+          if [ -z "${HF_SPACE_REPO}" ] || [ -z "${HF_TOKEN}" ]; then
+            echo "::notice::HF_SPACE_REPO / HF_TOKEN not configured for this repo -- see this file's header comment. Skipping push."
+            exit 0
           fi
           cd /tmp/space_payload
           git init -q
