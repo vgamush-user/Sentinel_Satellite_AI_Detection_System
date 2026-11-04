@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 from pathlib import Path
@@ -18,7 +19,9 @@ load_dotenv()
 
 from tools.incident_reporter_tool import AssembleIncidentRecordTool
 
-llm = LLM(model="groq/llama-3.3-70b-versatile")
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()
 
 incident_reporter_agent = Agent(
     role="Incident Reporter",

@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 from pathlib import Path
@@ -17,9 +18,11 @@ _crewai_cache.mark_cache_breakpoint = lambda message: dict(message)
 
 load_dotenv()
 
-from tools.classifier_tool import ClassifyTelemetryTool, ClassificationResult, FEATURE_ORDER
+from tools.classifier_tool import ClassifyTelemetryTool, FEATURE_ORDER, CLASSIFIER_EXPECTED_OUTPUT, parse_classification
 
-llm = LLM(model="groq/llama-3.3-70b-versatile")
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()
 
 classifier_agent = Agent(
     role="Classifier",
@@ -42,11 +45,10 @@ if __name__ == "__main__":
             "then report the class and confidence:\n\n"
             f"{json.dumps(sample_row, indent=2)}"
         ),
-        expected_output="The predicted class name and confidence score.",
+        expected_output=CLASSIFIER_EXPECTED_OUTPUT,
         agent=classifier_agent,
-        output_pydantic=ClassificationResult,
     )
 
     crew = Crew(agents=[classifier_agent], tasks=[task], verbose=True)
     result = crew.kickoff()
-    print(result.pydantic)
+    print(parse_classification(result.raw))

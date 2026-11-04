@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -18,10 +19,12 @@ _crewai_cache.mark_cache_breakpoint = lambda message: dict(message)
 load_dotenv()
 
 from tools.monitor_tool import should_escalate, FEATURE_ORDER
-from tools.classifier_tool import ClassifyTelemetryTool, ClassificationResult
+from tools.classifier_tool import ClassifyTelemetryTool, ClassificationResult, CLASSIFIER_EXPECTED_OUTPUT, parse_classification
 from simulator.telemetry_simulator import TelemetryReplaySimulator
 
-llm = LLM(model="groq/llama-3.3-70b-versatile")
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()
 
 classifier_agent = Agent(
     role="Classifier",
@@ -40,13 +43,12 @@ def classify_window(window: dict) -> ClassificationResult:
             "then report the class and confidence:\n\n"
             f"{json.dumps(window, indent=2)}"
         ),
-        expected_output="The predicted class name and confidence score.",
+        expected_output=CLASSIFIER_EXPECTED_OUTPUT,
         agent=classifier_agent,
-        output_pydantic=ClassificationResult,
     )
     crew = Crew(agents=[classifier_agent], tasks=[task], verbose=False)
     output = crew.kickoff()
-    return output.pydantic
+    return parse_classification(output.raw)
 
 
 MAX_ROWS_TO_PROCESS = 8  # smoke-test cap: bound Groq calls, don't burn the whole dataset

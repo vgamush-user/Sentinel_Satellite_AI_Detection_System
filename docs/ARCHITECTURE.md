@@ -7,7 +7,7 @@
 | Agent | Role | Tool(s) | LLM used? |
 |---|---|---|---|
 | Monitor | Decides whether a telemetry window is anomalous enough to escalate | `should_escalate()` — z-score check against nominal-baseline stats, calibrated on genuinely-Normal *noised* data (not clean raw data — see Known Limitations) | No — pure deterministic function, by design. Cost-aware: only ~3% of Normal traffic ever reaches an LLM call. |
-| Classifier | Classifies an escalated window into Normal or one of 4 attack classes | `classify_telemetry()` — wraps the ML Lead's baseline XGBoost model | Yes (Groq, `llama-3.3-70b-versatile`) |
+| Classifier | Classifies an escalated window into Normal or one of 4 attack classes | `classify_telemetry()` — wraps the ML Lead's baseline XGBoost model | Yes (Groq, `openai/gpt-oss-120b`) |
 | SPARTA Analyst | Explains a detection in SPARTA threat-taxonomy terms, with real-world precedent | `get_sparta_class_mapping()` (exact metadata lookup) + `search_sparta_incidents()` (semantic search over a ChromaDB knowledge base of 5 class mappings + 8 real incidents) | Yes |
 | Mitigation | Applies the Cybersecurity Lead's confidence-band policy | `decide_mitigation()` — deterministic policy lookup; the LLM only narrates justification, never overrides the tool's action | Yes (narration only) |
 | Incident Reporter | Turns a full detection into a human-reviewer report | `assemble_incident_record()` — deterministic severity + false-positive-risk assessment, matching the JSON schema in `cybersecurity_lead_complete_package.md` §5 | Yes |
