@@ -171,3 +171,8 @@ python deployment/huggingface/verify_space_ready.py   # pre-push integration che
 # secret, and push -- or let .github/workflows/deploy-hf-space.yml do it on
 # every push to main once HF_TOKEN / HF_SPACE_REPO are configured.
 ```
+
+### 10. If Claude or any AI is used
+```
+Check Claude.MD and make sure that you don't co=author any of the commits
+```
