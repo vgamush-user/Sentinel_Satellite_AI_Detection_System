@@ -40,6 +40,7 @@ const workspaceRoutes = { overview: "overview", live: "telemetry", incidents: "i
 let currentWorkspace;
 const workspaceScroll = new Map();
 let feedSnapshot = [];
+let predictionMixKey;
 let loadedSample;
 let sampleRequest = 0;
 let sampleLoading = false;
@@ -252,8 +253,15 @@ function setupStatic() {
   sel.innerHTML = S.config.classes.map((c) => `<option>${esc(c)}</option>`).join("") + `<option value="random">Random row</option>`;
   sel.value = "Command Flooding";
 
-  $("t-features").innerHTML = S.config.features.map((f) =>
-    `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" data-f="${esc(f)}"></label>`).join("");
+  const featureGroups = { "Message fields": [], "Window statistics": [], "Memory readings": [] };
+  for (const feature of S.config.features) {
+    const group = /^Memory/.test(feature) ? "Memory readings" :
+      /Window|Sliding/.test(feature) ? "Window statistics" : "Message fields";
+    featureGroups[group].push(feature);
+  }
+  $("t-features").innerHTML = Object.entries(featureGroups).filter(([, fields]) => fields.length)
+    .map(([name, fields]) => `<fieldset class="feature-group"><legend>${name}</legend><div class="features">${fields.map((f) =>
+      `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" data-f="${esc(f)}"></label>`).join("")}</div></fieldset>`).join("");
   $("t-features").addEventListener("input", (e) => {
     if (e.target.dataset.f) {
       e.target.classList.toggle("changed", e.target.value === "" || Number(e.target.value) !== Number(e.target.dataset.orig));
@@ -273,7 +281,15 @@ function setupStatic() {
     const button = event.target.closest("[data-row]");
     if (button) {
       const selected = feedSnapshot.findIndex((row) => String(row.entry_id) === button.dataset.row);
-      if (selected >= 0) showSnapshot({ rows: feedSnapshot, selected, triggerIds: new Set(), openerId: button.dataset.row });
+      if (selected < 0) return;
+      if (S.evidence) {
+        const range = $("evidence-row");
+        range.value = selected + 1;
+        selectEvidenceRow();
+        range.focus();
+      } else {
+        showSnapshot({ rows: feedSnapshot, selected, triggerIds: new Set(), openerId: button.dataset.row });
+      }
     }
   });
   $("feed").addEventListener("focusout", (event) => {
@@ -354,8 +370,10 @@ function onBatch(b) {
     S.recent.push(...b.telemetry);
     if (S.recent.length > liveRowLimit) S.recent.splice(0, S.recent.length - liveRowLimit);
     b.telemetry.forEach(trackRow);
-    renderFeed();
-    if (!S.evidence) chartDirty = true;
+    if (!S.evidence) {
+      renderFeed();
+      chartDirty = true;
+    }
   }
   (b.incidents || []).forEach(onIncidentEvent);
   (b.reports || []).forEach(onReportEvent);
@@ -419,10 +437,28 @@ function renderStats(s) {
   $("st-dataset").textContent = dataset === "raw" ? "Raw telemetry"
     : dataset === "noised" ? "Noised telemetry" : dataset || "unknown";
   $("st-lat").textContent = s.latency_p50_ms == null ? "–" : Math.round(s.latency_p50_ms) + " ms";
+  $("st-last-row").textContent = s.last_row_age_sec == null ? "–" : `${s.last_row_age_sec.toFixed(1)} s ago`;
+  $("st-incidents").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rows").textContent = s.rows_total.toLocaleString();
   $("overview-session").textContent = `${$("st-dataset").textContent} · ${s.rows_total.toLocaleString()} rows scored · ${s.rows_per_sec} rows/s`;
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rep").textContent = (s.counts.reports_finished || 0).toLocaleString();
+  renderPredictionMix(s.pred_counts || {});
+}
+
+function renderPredictionMix(counts) {
+  const classes = S.config.classes;
+  const values = classes.map((name) => counts[name] || 0);
+  const key = values.join(",");
+  if (key === predictionMixKey) return;
+  predictionMixKey = key;
+  const total = values.reduce((sum, count) => sum + count, 0);
+  $("prediction-counts").innerHTML = classes.map((name, index) => {
+    const count = values[index];
+    const share = total ? (100 * count / total).toFixed(1) : 0;
+    return `<li><span>${cls(name)}</span><b>${count.toLocaleString()}</b>
+      <span class="mix-track" aria-hidden="true"><i style="width:${share}%;background:var(${classColorToken(name)})"></i></span></li>`;
+  }).join("");
 }
 
 function renderFeed() {
@@ -431,9 +467,12 @@ function renderFeed() {
   const held = feed.contains(document.activeElement);
   $("feed-held").hidden = !held;
   if (held) return;
-  feedSnapshot = S.recent.slice();
+  const evidence = S.evidence;
+  feedSnapshot = evidence?.rows ?? S.recent.slice();
+  const end = evidence ? Math.min(feedSnapshot.length, Math.max(14, evidence.selected + 1)) : feedSnapshot.length;
+  const selectedId = evidence ? String(feedSnapshot[evidence.selected].entry_id) : null;
   const rows = new Map();
-  for (const row of feedSnapshot.slice(-14).reverse()) {
+  for (const row of feedSnapshot.slice(Math.max(0, end - 14), end).reverse()) {
     const id = String(row.entry_id);
     if (!rows.has(id)) rows.set(id, row);
   }
@@ -453,13 +492,15 @@ function renderFeed() {
     if (!item) {
       item = document.createElement("li");
       item.innerHTML = `<button type="button" class="telemetry-row" data-row="${esc(id)}">
-    <span><small>Time</small><b>${fmtTime(row.ts)}</b><span class="sr-only"> · Row ${esc(row.entry_id)}</span></span>
-    <span><small>Source</small>${row.source === "replay" ? "Replay" : "Injected test"}</span>
-    <span><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
-    <span><small>Predicted</small>${cls(row.predicted_class)}</span>
+    <span class="feed-prediction"><small>Predicted</small>${cls(row.predicted_class)}</span>
     <span><small>Confidence</small>${row.confidence.toFixed(3)}</span>
+    <span class="feed-time"><small>Time</small>${fmtTime(row.ts)}<span class="sr-only"> · Row ${esc(row.entry_id)}</span></span>
+    <span><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
+    <span><small>Source</small><span class="badge">${row.source === "replay" ? "Replay" : "Injected test"}</span></span>
   </button>`;
     }
+    const pressed = String(id === selectedId);
+    if (item.firstElementChild.getAttribute("aria-pressed") !== pressed) item.firstElementChild.setAttribute("aria-pressed", pressed);
     if (item === next) next = next.nextElementSibling;
     else feed.insertBefore(item, next);
   }
@@ -549,10 +590,15 @@ function showEvidence(selection, triggerIds, matching) {
 
 function showSnapshot(snapshot) {
   S.evidence = snapshot;
+  $("live-view").classList.add("is-snapshot");
   showWorkspace("live");
   $("chart-heading").textContent = snapshot.id ? "Incident telemetry" : "Telemetry snapshot";
   $("chart").setAttribute("aria-label", "Frozen telemetry snapshot with the selected row highlighted");
   $("chart-evidence").hidden = false;
+  $("live-context").hidden = true;
+  $("prediction-mix").hidden = true;
+  $("chart-mode").textContent = "Snapshot";
+  $("feed-heading").textContent = "Snapshot telemetry rows";
   $("back-incident").hidden = !snapshot.id;
   $("evidence-summary").textContent = snapshot.id
     ? `${snapshot.id} · ${snapshot.matchingCount} of ${snapshot.triggerIds.size} trigger rows captured`
@@ -573,22 +619,29 @@ function selectEvidenceRow() {
   const trigger = evidence.triggerIds.has(row.entry_id);
   const source = row.source === "replay" ? "Replay" : "Injected test";
   $("evidence-detail").innerHTML = [
-    fact("Row ID", row.entry_id), fact("Timestamp", fmtTime(row.ts, true)), fact("Source", source),
-    fact("Dataset label", row.true_class), fact("Predicted class", row.predicted_class),
-    fact("Threat score", pct(row.threat)), fact("Model confidence", row.confidence.toFixed(3)),
+    fact("Predicted class", row.predicted_class), fact("Model confidence", row.confidence.toFixed(3)),
+    fact("Dataset label", row.true_class), fact("Threat score", pct(row.threat)),
+    fact("Timestamp", fmtTime(row.ts, true)), fact("Source", source), fact("Row ID", row.entry_id),
     trigger ? fact("Incident evidence", "Trigger row") : "",
   ].join("");
   range.setAttribute("aria-valuetext", `Row ${range.value} of ${evidence.rows.length} · ${fmtTime(row.ts, true)} · ${row.predicted_class}`);
+  renderFeed();
   drawChart();
 }
 
 function returnToLive() {
   const openerId = S.evidence?.openerId;
   S.evidence = null;
+  $("live-view").classList.remove("is-snapshot");
   $("chart-evidence").hidden = true;
+  $("live-context").hidden = false;
+  $("prediction-mix").hidden = false;
+  $("chart-mode").textContent = "Live replay";
+  $("feed-heading").textContent = "Recent telemetry rows";
   $("chart-heading").textContent = "Telemetry replay";
   $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
   drawChart();
+  renderFeed();
   const row = openerId && $("feed").querySelector(`[data-row="${CSS.escape(openerId)}"]`);
   (row || $(openerId ? "feed-heading" : "chart-heading")).focus();
 }
@@ -731,9 +784,11 @@ function renderDrawer() {
 
   body.innerHTML = `
     <div class="dr-head">
+      <p class="dashboard-label">Incident inspector</p>
       <h3 id="dr-title">Predicted: ${cls(i.attack_class)}</h3>
       <p class="hint">${esc(id)} · ${i.status === "open" ? "Open" : "Closed"}</p>
     </div>
+    ${matching.length ? '<button class="btn incident-evidence-action" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
     ${resultSections({
       prediction: `${review ? '<p class="review-note"><strong>Awaiting review</strong> · Check the evidence before interpreting the policy outcome.</p>' : agentBadge(i)}
         <dl class="result-facts">${fact("Peak model confidence", i.peak_confidence?.toFixed(4))}
@@ -741,7 +796,6 @@ function renderDrawer() {
         ${i.report_predicted_class && !cached ? fact("Analysis prediction", i.report_predicted_class) + fact("Analysis confidence", i.report_confidence) : ""}</dl>
         <p class="hint">${confidenceNote}</p>`,
       evidence: `<p>${evidenceSummary}</p>
-        ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
         <p class="hint">Per-window feature attribution is unavailable.</p>
         ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}`,
       policy: `<p class="hint">Structured policy details are unavailable for this incident. Policy explanations describe simulated outcomes.</p>

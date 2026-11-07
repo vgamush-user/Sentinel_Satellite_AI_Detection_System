@@ -73,45 +73,65 @@
 </section>
 
 <section class="grid" id="live-view" aria-labelledby="show-live" hidden>
-  <section class="telemetry-status" aria-label="Replay system status">
-  <div class="pills">
-    <span class="pill" id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Kafka status unavailable</span></span>
-    <span class="pill"><b id="st-rate">0</b> rows/s</span>
-    <span class="pill" title="All labeled rows seen since the dashboard server started, including injections">Session accuracy <b id="st-acc">&ndash;</b><span class="sr-only"> across all labeled rows since the dashboard server started, including injections</span></span>
-    <span class="pill">latency <b id="st-lat">&ndash;</b></span>
-    <span class="pill">Configured agent mode <b id="st-mode">&ndash;</b></span>
-    <span class="pill replay-pill">Replay dataset <b id="st-dataset">unknown</b></span>
-  </div>
+  <section class="card telemetry-status" aria-label="Replay system status">
+    <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong></div>
+    <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
+    <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
+    <div class="replay-metric"><span>Replay dataset</span><strong id="st-dataset">Unknown</strong></div>
   </section>
   <section class="card" id="card-chart">
     <div class="card-head">
-      <h2 id="chart-heading" tabindex="-1">Telemetry replay</h2>
-      <div class="legend" id="legend"></div>
+      <div><p class="dashboard-label">Score timeline</p><h2 id="chart-heading" tabindex="-1">Telemetry replay</h2></div>
+      <span class="badge" id="chart-mode">Live replay</span>
     </div>
+    <div class="legend" id="legend"></div>
     <div class="chart-wrap" id="chart-wrap">
       <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
     </div>
-    <div id="chart-evidence" class="evidence-controls" hidden>
-      <div class="evidence-heading">
-        <p id="evidence-summary"></p>
-        <div class="evidence-actions"><button type="button" class="btn ghost" id="back-incident">Back to incident</button> <button type="button" class="btn" id="back-live">Resume live view</button></div>
-      </div>
-      <label for="evidence-row">Inspect snapshot row</label>
-      <input id="evidence-row" type="range" min="1" max="1" value="1" step="1">
-      <dl id="evidence-detail" class="result-facts"></dl>
-    </div>
-    <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
+    <details class="chart-guide"><summary>How to read this chart</summary>
+      <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
+    </details>
   </section>
 
+  <aside class="telemetry-inspector" aria-labelledby="telemetry-inspector-title">
+    <section class="card">
+      <p class="dashboard-label">Row inspector</p>
+      <h2 id="telemetry-inspector-title">Selected telemetry</h2>
+      <div id="live-context">
+        <p class="inspector-guide">Select a recent row to inspect its prediction and evidence.</p>
+        <dl class="inspector-facts">
+          <div><dt>Last row received</dt><dd id="st-last-row">–</dd></div>
+          <div><dt>Incidents opened this session</dt><dd id="st-incidents">–</dd></div>
+        </dl>
+      </div>
+      <div id="chart-evidence" class="evidence-controls" hidden>
+        <p class="inspector-guide" id="evidence-summary"></p>
+        <dl id="evidence-detail" class="inspector-facts"></dl>
+        <label for="evidence-row">Inspect snapshot row</label>
+        <input id="evidence-row" type="range" min="1" max="1" value="1" step="1">
+        <div class="evidence-actions"><button type="button" class="btn" id="back-live">Resume live view</button> <button type="button" class="btn ghost" id="back-incident">Back to incident</button></div>
+      </div>
+    </section>
+    <section class="card prediction-mix" id="prediction-mix">
+      <p class="dashboard-label">Scoring session</p>
+      <h2>Predictions by class</h2>
+      <p class="hint">All scored rows since server start, including injected tests.</p>
+      <ul id="prediction-counts"></ul>
+    </section>
+  </aside>
+
   <section class="card" id="card-feed">
-    <div class="card-head"><h2 id="feed-heading" tabindex="-1">Recent telemetry rows</h2></div>
-    <p class="hint">Select a row to inspect a fixed snapshot while replay continues.</p>
+    <div class="card-head"><h2 id="feed-heading" tabindex="-1">Recent telemetry rows</h2><span class="hint">Select a row to inspect</span></div>
     <p class="hint" id="feed-held" role="status" hidden>Rows are held while you navigate the feed. Replay continues in the background.</p>
-    <div class="telemetry-columns" aria-hidden="true"><span>Time</span><span>Source</span><span>Dataset label</span><span>Predicted</span><span>Confidence</span></div>
+    <div class="telemetry-columns" aria-hidden="true"><span>Predicted</span><span>Confidence</span><span>Time</span><span>Dataset label</span><span>Source</span></div>
     <ul id="feed" class="telemetry-rows"><li class="hint">Waiting for scored telemetry.</li></ul>
   </section>
   <details class="pipeline-details">
     <summary>Pipeline health</summary>
+    <dl class="pipeline-metrics">
+      <div><dt>Session accuracy</dt><dd id="st-acc">–</dd><small>All labeled rows since server start, including injected tests.</small></div>
+      <div><dt>Configured agent mode</dt><dd id="st-mode">–</dd></div>
+    </dl>
 <section class="pipeline" aria-label="Pipeline">
   <div class="stage svc"><span>Producer</span><small>CSV replay + inject</small></div>
   <div class="arrow"></div>
@@ -136,7 +156,7 @@
 <section id="incidents-view" aria-labelledby="show-incidents" hidden>
   <section id="card-incidents" aria-labelledby="incidents-heading">
     <div class="incident-toolbar">
-      <h2 id="incidents-heading" class="sr-only" tabindex="-1">Incident queue</h2>
+      <div class="card-head"><h2 id="incidents-heading" tabindex="-1">Incident queue</h2></div>
       <label>Find incident <input id="incident-search" type="search" placeholder="ID or attack class"></label>
       <label>Attack class <select id="incident-class"><option value="">All classes</option></select></label>
       <label>Incident state <select id="incident-state"><option value="">Any state</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
@@ -146,6 +166,11 @@
     <p class="queue-count" id="inc-count"></p>
     <div class="incidents" id="incidents"><p class="queue-empty">Loading incidents…</p></div>
   </section>
+  <aside class="card incident-preview">
+    <p class="dashboard-label">Incident inspector</p>
+    <h2>Selected incident</h2>
+    <p class="inspector-guide">Select an incident to review its prediction, trigger rows, and report.</p>
+  </aside>
   <aside class="drawer" id="drawer" hidden>
     <section class="drawer-panel" aria-labelledby="dr-title">
       <button class="close" id="dr-close" type="button" aria-label="Close incident details">&times;</button>
@@ -176,10 +201,11 @@
       <button class="btn ghost" id="t-load">Load sample</button>
       <button class="btn ghost" id="t-use-loaded" type="button" hidden>Use loaded sample</button>
     </div>
-    <p class="hint" id="t-origin">No sample loaded.</p>
-    <p class="hint" id="t-ground-truth"></p>
-    <p class="hint" id="t-load-status" role="status"></p>
-    <details id="feature-editor"><summary>Edit feature values</summary><div class="features" id="t-features"></div></details>
+    <div class="sample-provenance">
+      <p class="hint" id="t-origin">No sample loaded.</p>
+      <p class="hint" id="t-ground-truth"></p>
+      <p class="hint" id="t-load-status" role="status"></p>
+    </div>
     <div class="row send-row">
       <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
       <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst</label>
@@ -188,9 +214,11 @@
       <button class="btn primary" id="t-send" disabled>Send entry</button>
     </div>
     <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
+    <details id="feature-editor"><summary>Edit feature values</summary><div id="t-features"></div></details>
   </section>
 
   <section class="card" id="card-tracker">
+    <p class="dashboard-label">Pipeline activity</p>
     <div class="card-head"><h2>Run progress</h2><small id="tr-title">No runs yet</small></div>
     <ol class="tracker" id="tracker">
       <li class="wait"><b>Sent to Kafka</b><span>Send a telemetry entry or run a simulation</span></li>
