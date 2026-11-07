@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel Live Monitor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="30" height="30"><circle cx="16" cy="16" r="5" fill="currentColor"/><ellipse cx="16" cy="16" rx="14" ry="6" fill="none" stroke="currentColor" stroke-width="1.6" transform="rotate(-25 16 16)"/></svg>
+    </div>
+    <div>
+      <h1>Sentinel <span>Live Satellite Threat Monitor</span></h1>
+      <p class="sub">Telemetry streams through Apache Kafka &rarr; XGBoost scores every row &rarr; attacks become incidents &rarr; AI agents write the response</p>
+    </div>
+  </div>
+  <div class="pills">
+    <span class="pill" id="pill-kafka"><i class="dot"></i>Kafka</span>
+    <span class="pill"><b id="st-rate">0</b> rows/s</span>
+    <span class="pill">accuracy <b id="st-acc">&ndash;</b></span>
+    <span class="pill">latency <b id="st-lat">&ndash;</b></span>
+    <span class="pill">agents <b id="st-mode">&ndash;</b></span>
+  </div>
+</header>
+
+<section class="pipeline" aria-label="Pipeline">
+  <div class="stage svc"><span>Producer</span><small>CSV replay + inject</small></div>
+  <div class="arrow"></div>
+  <div class="stage topic"><span>telemetry.raw</span></div>
+  <div class="arrow"></div>
+  <div class="stage svc"><span>Detector</span><small>XGBoost per row</small></div>
+  <div class="arrow"></div>
+  <div class="stage topic"><span>telemetry.scored</span><b id="pc-rows">0</b></div>
+  <div class="arrow"></div>
+  <div class="stage svc"><span>Incident manager</span><small id="pc-guard">guards</small></div>
+  <div class="arrow"></div>
+  <div class="stage topic"><span>incidents</span><b id="pc-inc">0</b></div>
+  <div class="arrow"></div>
+  <div class="stage svc"><span>4 AI agents</span><small>Groq, per incident</small></div>
+  <div class="arrow"></div>
+  <div class="stage topic"><span>reports</span><b id="pc-rep">0</b></div>
+</section>
+
+<main class="grid">
+  <section class="card span2" id="card-chart">
+    <div class="card-head">
+      <h2>Live telemetry</h2>
+      <div class="legend" id="legend"></div>
+    </div>
+    <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+    <p class="hint">Each dot is one telemetry row: its threat score (1 &minus; P(Normal)), coloured by the class XGBoost predicted. Large dots are attack evidence (confidence &ge; <span class="g-conf">0.7</span>). Dots with a ring were injected.</p>
+  </section>
+
+  <section class="card" id="card-attack">
+    <div class="card-head"><h2>Launch an attack</h2></div>
+    <p class="hint">Sends a burst of real attack rows from the dataset into the live stream.</p>
+    <div class="attack-buttons" id="attack-buttons"></div>
+    <div class="row">
+      <label>Telemetry quality
+        <select id="atk-quality">
+          <option value="clean">Clean (model reliable)</option>
+          <option value="noisy">Noisy (realistic, harder)</option>
+        </select>
+      </label>
+      <label>Rows <input id="atk-count" type="number" min="5" max="100" value="15"></label>
+    </div>
+  </section>
+
+  <section class="card span2" id="card-test">
+    <div class="card-head"><h2>Test a new entry</h2></div>
+    <div class="row">
+      <label>Start from
+        <select id="t-class"></select>
+      </label>
+      <label>Quality
+        <select id="t-quality">
+          <option value="clean">Clean</option>
+          <option value="noisy">Noisy</option>
+        </select>
+      </label>
+      <button class="btn ghost" id="t-load">Load sample</button>
+      <span class="hint" id="t-origin"></span>
+    </div>
+    <div class="features" id="t-features"></div>
+    <div class="row send-row">
+      <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
+      <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst &times; <input id="t-burst" type="number" min="2" max="50" value="10"></label>
+      <button class="btn primary" id="t-send">Send &#9656;</button>
+    </div>
+    <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so only a burst gets an AI report.</p>
+  </section>
+
+  <section class="card" id="card-tracker">
+    <div class="card-head"><h2>Tracking</h2><small id="tr-title">nothing sent yet</small></div>
+    <ol class="tracker" id="tracker">
+      <li class="wait"><b>Sent to Kafka</b><span>Send an entry or launch an attack</span></li>
+      <li class="wait"><b>Detected</b><span></span></li>
+      <li class="wait"><b>Incident</b><span></span></li>
+      <li class="wait"><b>AI report</b><span></span></li>
+    </ol>
+  </section>
+
+  <section class="card span2" id="card-incidents">
+    <div class="card-head"><h2>Incidents</h2><small id="inc-count"></small></div>
+    <div class="incidents" id="incidents"><p class="empty">No incidents yet. Launch an attack to create one.</p></div>
+  </section>
+
+  <section class="card" id="card-feed">
+    <div class="card-head"><h2>Live feed</h2></div>
+    <table class="feed">
+      <thead><tr><th>Time</th><th>Source</th><th>True</th><th>Detected</th><th>Conf</th></tr></thead>
+      <tbody id="feed"></tbody>
+    </table>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="dr-title">
+    <button class="close" id="dr-close" aria-label="Close">&times;</button>
+    <div id="dr-body"></div>
+  </div>
+</aside>
+
+<footer class="foot">Sentinel Satellite AI Detection System &middot; Kafka UI: <a href="http://localhost:8080" target="_blank" rel="noopener">localhost:8080</a></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -28,6 +28,45 @@ def classify_telemetry(window: dict) -> dict:
     return {"class": CLASS_NAMES[label], "confidence": round(float(proba[label]), 4)}
 
 
+# Plain text on purpose: asking gpt-oss for JSON makes it emit a call to a
+# nonexistent 'json' tool, which Groq rejects (tool_use_failed).
+CLASSIFIER_EXPECTED_OUTPUT = (
+    "One plain-text line, no JSON: the predicted class name exactly as the tool "
+    "returned it, then the confidence score as a decimal, e.g. 'Command Flooding, confidence 0.9999'."
+)
+
+
+def parse_classification(raw: str) -> "ClassificationResult | None":
+    """Parse the Classifier agent's plain-text answer into a ClassificationResult.
+
+    Replaces CrewAI's output_pydantic: with Groq's gpt-oss models, output_pydantic
+    makes the model emit a call to a nonexistent 'json' tool, which Groq rejects
+    (tool_use_failed). Asking for a plain-text answer and parsing it here avoids
+    that. Accepts a JSON object too. Returns None if no known class + confidence
+    can be found.
+    """
+    import re
+
+    if not raw:
+        return None
+    match = re.search(r"\{.*?\}", raw, re.S)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            cls = data.get("predicted_class") or data.get("class")
+            if cls in CLASS_NAMES and "confidence" in data:
+                return ClassificationResult(predicted_class=cls, confidence=float(data["confidence"]))
+        except (ValueError, TypeError):
+            pass
+    # Fallback: free text. Longest names first so "Normal" can't shadow anything.
+    lowered = raw.lower()
+    cls = next((c for c in sorted(CLASS_NAMES, key=len, reverse=True) if c.lower() in lowered), None)
+    num = re.search(r"\b(0(?:\.\d+)?|1(?:\.0+)?)\b", raw)
+    if cls and num:
+        return ClassificationResult(predicted_class=cls, confidence=float(num.group(1)))
+    return None
+
+
 TelemetryWindow = create_model(
     "TelemetryWindow",
     **{f: (float, ...) for f in FEATURE_ORDER},

@@ -19,7 +19,7 @@ Guardrails:
      handling and marks the incident FLAGGED_FOR_REVIEW instead of
      guessing.
 """
-from tools.mitigation_tool import POLICY
+import os
 import sys
 import time
 from pathlib import Path
@@ -37,13 +37,25 @@ _crewai_cache.mark_cache_breakpoint = lambda message: dict(message)
 
 load_dotenv()
 
+from tools.mitigation_tool import POLICY
 from tools.monitor_tool import should_escalate, FEATURE_ORDER
-from tools.classifier_tool import ClassificationResult
+from tools.classifier_tool import CLASSIFIER_EXPECTED_OUTPUT, parse_classification
 from agents.classifier_agent import classifier_agent
 from agents.sparta_agent import sparta_agent
 from agents.mitigation_agent import mitigation_agent
 from agents.incident_reporter_agent import incident_reporter_agent
 from simulator.telemetry_simulator import TelemetryReplaySimulator
+
+
+# Groq free tier caps gpt-oss at 8k tokens/minute and one 4-agent chain uses
+# ~10k, so pause between tasks to keep the chain from hitting a 429 mid-run.
+# Set PIPELINE_TASK_PAUSE_SEC=0 on a paid tier.
+TASK_PAUSE_SEC = float(os.getenv("PIPELINE_TASK_PAUSE_SEC", "20"))
+
+
+def _pause_between_tasks(_output) -> None:
+    if TASK_PAUSE_SEC > 0:
+        time.sleep(TASK_PAUSE_SEC)
 
 
 def run_pipeline_for_window(window: dict) -> dict:
@@ -57,9 +69,9 @@ def run_pipeline_for_window(window: dict) -> dict:
             "Use the classify_telemetry tool to classify this telemetry window, "
             "then report the class and confidence:\n\n" + json.dumps(window, indent=2)
         ),
-        expected_output="The predicted class name and confidence score.",
+        expected_output=CLASSIFIER_EXPECTED_OUTPUT,
         agent=classifier_agent,
-        output_pydantic=ClassificationResult,
+        callback=_pause_between_tasks,
     )
 
     sparta_task = Task(
@@ -72,6 +84,7 @@ def run_pipeline_for_window(window: dict) -> dict:
         expected_output="The SPARTA tactic ID, technique ID, a related incident, and a plain-language explanation.",
         agent=sparta_agent,
         context=[classify_task],
+        callback=_pause_between_tasks,
     )
 
     mitigation_task = Task(
@@ -84,6 +97,7 @@ def run_pipeline_for_window(window: dict) -> dict:
         expected_output="The exact action and tool function from the policy, plus a plain-language justification.",
         agent=mitigation_agent,
         context=[classify_task],
+        callback=_pause_between_tasks,
     )
 
     report_task = Task(
@@ -116,13 +130,13 @@ def run_pipeline_for_window(window: dict) -> dict:
     except Exception as e:
         return {
             "status": "ERROR",
-            "classification": classify_task.output.pydantic if classify_task.output else None,
+            "classification": parse_classification(classify_task.output.raw) if classify_task.output else None,
             "sparta_context": "",
             "mitigation": "",
             "report": f"Pipeline failed during agent execution: {e}",
         }
 
-    classification = classify_task.output.pydantic
+    classification = parse_classification(classify_task.output.raw)
     sparta_raw = sparta_task.output.raw
     mitigation_raw = mitigation_task.output.raw
     report_raw = report_task.output.raw

@@ -101,8 +101,8 @@ class TelemetryReplaySimulator:
 
     def start(self) -> None:
         """(Re)start playback from row 0 with current configuration."""
+        self._stop_and_join_thread()
         with self._lock:
-            self._stop_thread_locked()
             self._indices = (
                 list(range(self.total_rows))
                 if self._order_mode == "sequential"
@@ -141,8 +141,8 @@ class TelemetryReplaySimulator:
 
     def stop(self) -> None:
         """Stop and reset playback entirely."""
+        self._stop_and_join_thread()
         with self._lock:
-            self._stop_thread_locked()
             self._cursor = 0
             self._rows_emitted = 0
             self._buffer.clear()
@@ -154,11 +154,15 @@ class TelemetryReplaySimulator:
             self._paused_accum = 0.0
             self._pause_started_at = None
 
-    def _stop_thread_locked(self) -> None:
-        # Not joined: the run loop needs this lock, so it exits on its own
-        # once it sees its event set.
-        self._stop_event.set()
-        self._running = False
+    def _stop_and_join_thread(self) -> None:
+        """Signal the current playback thread and wait for it to exit.
+        Joins outside the lock, since the run loop takes the lock itself."""
+        with self._lock:
+            self._stop_event.set()
+            self._running = False
+            t = self._thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2.0)
 
     # ------------------------------------------------------------------ #
     # Playback loop (background thread)
@@ -200,7 +204,7 @@ class TelemetryReplaySimulator:
                 self._rows_emitted += 1
                 self._cursor += 1
 
-            time.sleep(1.0 / speed)
+            stop_event.wait(1.0 / speed)  # like sleep, but wakes at once on stop
 
     # ------------------------------------------------------------------ #
     # Read API

@@ -82,7 +82,9 @@ def do_load_csv(name: str):
     if path is None:  # nothing outside the allow-list can be loaded
         return "Unknown dataset."
     try:
-        sim = TelemetryReplaySimulator(str(path), buffer_size=100)
+        new_sim = TelemetryReplaySimulator(str(path), buffer_size=100)
+        sim.stop()  # otherwise the old playback thread keeps running, orphaned
+        sim = new_sim
         plot_history = deque(maxlen=PLOT_HISTORY)
         return f"Loaded **{name}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
     except Exception as e:
@@ -129,32 +131,49 @@ def do_run_agent_pipeline():
     recently streamed row. Deliberately NOT automatic on every tick -- each
     run costs 4 Groq calls, so this is a click-to-run "demo mode" action,
     matching the project's cost-aware design (don't call the LLM on every
-    packet, and don't burn a reviewer's Groq quota without them asking)."""
+    packet, and don't burn a reviewer's Groq quota without them asking).
+
+    A generator, so the UI shows a "running" message immediately instead of
+    sitting blank for the 1-2 minutes a free-tier Groq run takes. Every
+    message must be yielded: a `return value` in a generator is discarded."""
     if not os.environ.get("GROQ_API_KEY"):
-        return (
+        yield (
             "Live analysis is unavailable: `GROQ_API_KEY` is not configured on this server. "
             "Use the Demo Mode buttons below for cached examples.",
             "",
         )
+        return
 
     snap = sim.snapshot()
     if snap.last_row is None:
-        return "No rows streamed yet — start the simulator first.", ""
+        yield "No rows streamed yet — start the simulator first.", ""
+        return
 
     row = snap.last_row
     window = {f: float(row[f]) for f in FEATURE_ORDER if f in row.index}
     true_label = int(row["Label"]) if "Label" in row.index else None
+    # The user clicked explicitly, so run the full chain even when the Monitor
+    # would not have escalated this window -- just say so in the header.
     monitor_note = (
         ""
         if should_escalate(window)
         else "Monitor Agent: nominal window (would **not** normally escalate) — ran anyway since you asked.  \n"
     )
 
+    yield (
+        monitor_note
+        + "⏳ **Running full agent analysis** (Classifier → SPARTA Analyst → Mitigation → "
+        "Incident Reporter) on the latest row. This takes about 1–2 minutes on the Groq "
+        "free tier; rate-limit waits are retried automatically.",
+        "",
+    )
+
     try:
         result = run_pipeline_for_window(window)
     except Exception as e:
         print(f"[dashboard] agent pipeline failed: {e!r}")
-        return "**Status:** ERROR — the agent pipeline failed. Check the server logs.", ""
+        yield "**Status:** ERROR — the agent pipeline failed. Check the server logs.", ""
+        return
 
     classification = result["classification"]
     header = monitor_note + (
@@ -163,7 +182,7 @@ def do_run_agent_pipeline():
         f"**Confidence:** {classification.confidence if classification else 'N/A'}  |  "
         f"**True label in data:** {true_label}"
     )
-    return header, result["report"]
+    yield header, result["report"]
 
 
 def do_show_demo_example(class_name: str):
@@ -218,14 +237,23 @@ def poll(metric_a, metric_b):
                     point[m] = snap.last_row[m]
             plot_history.append(point)
 
-    hist_df = pd.DataFrame(list(plot_history)) if plot_history else pd.DataFrame(columns=["_step"] + METRIC_CHOICES)
+    # Always float-typed, including when empty: an untyped empty frame is sent
+    # to the browser as 'nominal', and the chart then keeps a categorical
+    # (unsorted, evenly spaced) y-axis even after real numbers arrive.
+    hist_cols = ["_step"] + METRIC_CHOICES
+    hist_df = (
+        pd.DataFrame(list(plot_history), columns=hist_cols) if plot_history else pd.DataFrame(columns=hist_cols)
+    ).astype("float64")
 
     # --- ground-truth label mix currently in the live buffer (descriptive only) ---
     if not snap.buffer.empty and "Label" in snap.buffer.columns:
         counts = snap.buffer["Label"].value_counts().sort_index()
-        label_df = pd.DataFrame({"Label": counts.index.astype(str), "Count": counts.values})
+        # Labels are stored as floats (0.0..4.0); show them as "0".."4".
+        labels = [str(int(v)) if float(v).is_integer() else str(v) for v in counts.index]
+        label_df = pd.DataFrame({"Label": labels, "Count": counts.values})
     else:
-        label_df = pd.DataFrame(columns=["Label", "Count"])
+        # Typed empty frame for the same reason as hist_df above.
+        label_df = pd.DataFrame({"Label": pd.Series(dtype="str"), "Count": pd.Series(dtype="int64")})
 
     plot_a = gr.LinePlot(value=hist_df, x="_step", y=metric_a, title=metric_a) if metric_a in hist_df.columns else gr.LinePlot()
     plot_b = gr.LinePlot(value=hist_df, x="_step", y=metric_b, title=metric_b) if metric_b in hist_df.columns else gr.LinePlot()
@@ -287,7 +315,9 @@ with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
         plot_b = gr.LinePlot(label="Chart 2")
 
     gr.Markdown("### Ground-truth label mix in current buffer (descriptive only, not a detection)")
-    label_bar = gr.BarPlot(x="Label", y="Count", label=" ") if hasattr(gr, "BarPlot") else gr.Dataframe()
+    # y_lim starts the axis at 0: Vega otherwise zooms to [min, max] count,
+    # hiding the smallest bar entirely and exaggerating the differences.
+    label_bar = gr.BarPlot(x="Label", y="Count", label=" ", y_lim=[0, None]) if hasattr(gr, "BarPlot") else gr.Dataframe()
 
     gr.Markdown(
         "### 🤖 Agent Pipeline\n"

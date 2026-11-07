@@ -1,6 +1,5 @@
 # Only needed to reproduce deployment/onnx/export_and_benchmark.py.
-# Not part of the deployed HF Space (see ../huggingface/requirements.txt)
-# and not part of the root requirements.txt — this is a standalone Week 5
+# Not part of the root requirements.txt — this is a standalone Week 5
 # stretch-goal benchmark, not something the live agent pipeline depends on.
 
 onnx
