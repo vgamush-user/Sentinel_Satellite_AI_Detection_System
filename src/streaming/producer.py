@@ -15,8 +15,9 @@ import argparse
 import random
 import signal
 import time
+from pathlib import Path
 
-from streaming.config import CLASS_NAMES, DEFAULT_DATASET, TOPIC_RAW, log
+from streaming.config import CLASS_NAMES, DATASETS, DEFAULT_DATASET, TOPIC_RAW, log
 from streaming.inject import _get_producer, build_message, load_dataset, row_features, send_message
 from streaming.topics import ensure_topics
 
@@ -41,6 +42,7 @@ def main() -> None:
     ensure_topics()
 
     df = load_dataset(args.dataset)
+    replay_dataset = args.dataset if args.dataset in DATASETS else Path(args.dataset).name
     if args.mode == "normal":
         df = df[df["Label"] == 0].reset_index(drop=True)
     order = list(range(len(df)))
@@ -61,7 +63,9 @@ def main() -> None:
                 break
             row = df.iloc[idx]
             label = int(row["Label"])
-            send_message(build_message(row_features(row), "replay", label, seq=seq))
+            message = build_message(row_features(row), "replay", label, seq=seq)
+            message["replay_dataset"] = replay_dataset
+            send_message(message)
             producer.poll(0)
             seq += 1
             sent_since += 1

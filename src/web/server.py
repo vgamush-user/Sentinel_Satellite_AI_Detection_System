@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import Counter, deque
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -49,6 +49,7 @@ class Bridge:
         self.rate_window = deque()               # timestamps of the last ~5 s of rows
         self.latency_ms = deque(maxlen=200)
         self.last_row_ts = 0.0
+        self.replay_dataset: str | None = None
         self.counts = Counter()                  # incidents opened, reports finished, ...
         self.kafka_ok = False
         self.stop = threading.Event()
@@ -78,6 +79,7 @@ class Bridge:
             "rows_per_sec": round(len(self.rate_window) / 5, 1),
             "accuracy": round(self.correct / self.labelled, 4) if self.labelled else None,
             "labelled": self.labelled,
+            "replay_dataset": self.replay_dataset,
             "pred_counts": dict(self.pred_counts),
             "latency_p50_ms": lat[len(lat) // 2] if lat else None,
             "last_row_age_sec": round(now - self.last_row_ts, 1) if self.last_row_ts else None,
@@ -121,6 +123,10 @@ class Bridge:
                 self.recent.append(row)
                 self.total_rows += 1
                 self.pred_counts[row["predicted_class"]] += 1
+                if row["source"] == "replay":
+                    dataset = msg.get("replay_dataset")
+                    self.replay_dataset = (PureWindowsPath(dataset).name or None
+                                           if isinstance(dataset, str) else None)
                 if msg.get("true_label") is not None:
                     self.labelled += 1
                     self.correct += msg["predicted_label"] == msg["true_label"]
