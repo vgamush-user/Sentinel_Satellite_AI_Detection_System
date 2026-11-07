@@ -22,6 +22,32 @@ const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString([], { hour12
 const pct = (v) => v == null ? "–" : (v * 100).toFixed(1) + "%";
 const cls = (name) => `<span class="cls"><i style="background:${COLORS[name] || "#888"}"></i>${esc(name || "–")}</span>`;
 
+let lastFocusedElement = null;
+
+// ------------------------------------------------------------------------- //
+// Non-blocking toast notifications (replaces blocking alert)
+// ------------------------------------------------------------------------- //
+function toast(message, type = "info") {
+  const root = $("toast-root") || document.body;
+  const t = document.createElement("div");
+  t.className = `toast ${type}`;
+  const icon = type === "error" ? "⚠" : type === "success" ? "✓" : "ℹ";
+  t.innerHTML = `
+    <span class="toast-icon">${icon}</span>
+    <span class="toast-msg">${esc(message)}</span>
+    <button class="toast-close" aria-label="Dismiss">&times;</button>
+  `;
+  const close = () => {
+    t.classList.remove("show");
+    t.classList.add("leaving");
+    setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 180);
+  };
+  t.querySelector(".toast-close").addEventListener("click", close);
+  root.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add("show")));
+  setTimeout(close, 4000);
+}
+
 // ------------------------------------------------------------------------- //
 // Boot
 // ------------------------------------------------------------------------- //
@@ -66,13 +92,71 @@ function setupStatic() {
   $("t-features").innerHTML = S.config.features.map((f) =>
     `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" data-f="${esc(f)}"></label>`).join("");
   $("t-features").addEventListener("input", (e) => {
-    if (e.target.dataset.f) e.target.classList.toggle("changed", e.target.value !== e.target.dataset.orig);
+    if (e.target.dataset.f) {
+      e.target.classList.toggle("changed", e.target.value !== e.target.dataset.orig);
+      e.target.classList.remove("invalid");
+    }
   });
   $("t-load").addEventListener("click", loadSample);
   $("t-send").addEventListener("click", sendEntry);
   $("dr-close").addEventListener("click", closeDrawer);
   $("drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") closeDrawer(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+  // Focus trap inside modal drawer
+  $("drawer").addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const focusables = Array.from(
+      $("drawer").querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ).filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      last.focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      first.focus();
+      e.preventDefault();
+    }
+  });
+
+  // Interactive timeline scrubbing / inspection on telemetry canvas
+  const chartEl = $("chart");
+  const tipEl = $("chart-tip");
+  if (chartEl && tipEl) {
+    chartEl.addEventListener("pointermove", (e) => {
+      if (!S.recent.length) return;
+      const rect = chartEl.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const pad = { l: 34, r: 10, t: 10, b: 20 };
+      const iw = rect.width - pad.l - pad.r;
+      const n = 300;
+      const rows = S.recent;
+      const relX = mx - pad.l;
+      if (relX < 0 || relX > iw) {
+        tipEl.classList.remove("visible");
+        return;
+      }
+      const idx = Math.round((relX / iw) * (n - 1) - (n - rows.length));
+      if (idx >= 0 && idx < rows.length) {
+        const r = rows[idx];
+        const ih = (rect.height || 260) - pad.t - pad.b;
+        const py = pad.t + ih * (1 - r.threat);
+        const px = pad.l + iw * (idx + (n - rows.length)) / (n - 1);
+        tipEl.innerHTML = `<b>${fmtTime(r.ts)}</b> · ${cls(r.predicted_class)}<br>threat: <b>${(r.threat * 100).toFixed(1)}%</b> · conf: <b>${r.confidence.toFixed(3)}</b>`;
+        tipEl.style.left = px + "px";
+        tipEl.style.top = py + "px";
+        tipEl.classList.add("visible");
+      } else {
+        tipEl.classList.remove("visible");
+      }
+    });
+    chartEl.addEventListener("pointerleave", () => {
+      tipEl.classList.remove("visible");
+    });
+  }
+
   window.addEventListener("resize", drawChart);
 }
 
@@ -97,7 +181,7 @@ function onBatch(b) {
     S.recent.push(...b.telemetry);
     if (S.recent.length > 300) S.recent.splice(0, S.recent.length - 300);
     b.telemetry.forEach(trackRow);
-    flash("pc-rows");
+    // Note: high-frequency flash("pc-rows") reflow removed to eliminate main-thread layout thrashing
     renderFeed();
     chartDirty = true;
   }
@@ -283,6 +367,9 @@ function md(text) {
 }
 
 async function openDrawer(id, quiet) {
+  if (!quiet) {
+    lastFocusedElement = document.activeElement;
+  }
   let i = S.incidents.get(id) || {};
   if (!quiet) {
     try {
@@ -322,12 +409,19 @@ async function openDrawer(id, quiet) {
   d.dataset.id = id;
   d.classList.add("open");
   d.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+  setTimeout(() => $("dr-close").focus(), 60);
 }
 
 function closeDrawer() {
   const d = $("drawer");
   d.classList.remove("open");
   d.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+  if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+    lastFocusedElement.focus();
+    lastFocusedElement = null;
+  }
 }
 
 // ------------------------------------------------------------------------- //
@@ -342,7 +436,7 @@ async function loadSample() {
     const v = s.features[inp.dataset.f];
     inp.value = String(+v.toPrecision(8));
     inp.dataset.orig = inp.value;
-    inp.classList.remove("changed");
+    inp.classList.remove("changed", "invalid");
   });
   $("t-features").dataset.trueClass = s.true_class;
   $("t-origin").textContent = `Real ${q} row, true class: ${s.true_class}. Edit any value before sending.`;
@@ -383,10 +477,18 @@ async function sendEntry() {
   let bad = false;
   $("t-features").querySelectorAll("input").forEach((inp) => {
     const v = parseFloat(inp.value);
-    if (!isFinite(v)) { bad = true; inp.classList.add("changed"); }
+    if (!isFinite(v)) {
+      bad = true;
+      inp.classList.add("invalid");
+    } else {
+      inp.classList.remove("invalid");
+    }
     feats[inp.dataset.f] = v;
   });
-  if (bad) { alert("Every feature needs a number. Click “Load sample” to start from a real row."); return; }
+  if (bad) {
+    toast("Every feature needs a number. Click “Load sample” to start from a real row.", "error");
+    return;
+  }
   const burst = document.querySelector("input[name=t-mode]:checked").value === "burst";
   const count = burst ? Math.max(2, Math.min(50, +$("t-burst").value || 10)) : 1;
   const edited = [...$("t-features").querySelectorAll("input.changed")].length;
@@ -405,7 +507,7 @@ async function sendEntry() {
     startTracker(burst ? "burst" : "once", j.entry_ids,
       `${burst ? count + "× " : ""}test entry${edited ? ` (${edited} field${edited > 1 ? "s" : ""} edited)` : ""}`, trueClass);
   } catch (e) {
-    alert("Send failed: " + e.message);
+    toast("Send failed: " + e.message, "error");
   } finally {
     btn.disabled = false;
   }
@@ -425,7 +527,7 @@ async function launchAttack(c, btn) {
     if (!r.ok) throw new Error(j.detail || r.statusText);
     startTracker("burst", j.entry_ids, `${c} attack (${count} ${quality} rows)`, c);
   } catch (e) {
-    alert("Attack failed: " + e.message);
+    toast("Attack failed: " + e.message, "error");
   } finally {
     btn.disabled = false;
   }

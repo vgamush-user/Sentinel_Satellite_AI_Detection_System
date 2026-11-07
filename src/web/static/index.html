@@ -50,7 +50,10 @@
       <h2>Live telemetry</h2>
       <div class="legend" id="legend"></div>
     </div>
-    <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+    <div class="chart-wrap" id="chart-wrap">
+      <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+      <div class="chart-tooltip" id="chart-tip" role="tooltip" aria-hidden="true"></div>
+    </div>
     <p class="hint">Each dot is one telemetry row: its threat score (1 &minus; P(Normal)), coloured by the class XGBoost predicted. Large dots are attack evidence (confidence &ge; <span class="g-conf">0.7</span>). Dots with a ring were injected.</p>
   </section>
 
@@ -123,6 +126,8 @@
     <div id="dr-body"></div>
   </div>
 </aside>
+
+<div id="toast-root" class="toast-container" aria-live="polite"></div>
 
 <footer class="foot">Sentinel Satellite AI Detection System &middot; Kafka UI: <a href="http://localhost:8080" target="_blank" rel="noopener">localhost:8080</a></footer>
 <script src="/static/app.js"></script>
