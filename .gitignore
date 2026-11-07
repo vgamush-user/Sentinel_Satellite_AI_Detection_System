@@ -1,7 +1,10 @@
-.env
-.venv/
-__pycache__/
-*.pyc
 chroma_sparta/
 # real-time pipeline: SQLite history + service logs
 data/live/
+# Python Virtual Environment
+venv/
+.venv/
+# Python Cache
+__pycache__/
+*.pyc
+.env
