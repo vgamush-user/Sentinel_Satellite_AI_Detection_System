@@ -40,6 +40,10 @@ const workspaceRoutes = { overview: "overview", live: "telemetry", incidents: "i
 let currentWorkspace;
 const workspaceScroll = new Map();
 let feedSnapshot = [];
+let loadedSample;
+let sampleRequest = 0;
+let sampleLoading = false;
+let runPending = false;
 const incidentFilters = ["incident-search", "incident-class", "incident-state", "incident-report"];
 
 // ------------------------------------------------------------------------- //
@@ -252,8 +256,9 @@ function setupStatic() {
     `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" data-f="${esc(f)}"></label>`).join("");
   $("t-features").addEventListener("input", (e) => {
     if (e.target.dataset.f) {
-      e.target.classList.toggle("changed", e.target.value !== e.target.dataset.orig);
+      e.target.classList.toggle("changed", e.target.value === "" || Number(e.target.value) !== Number(e.target.dataset.orig));
       e.target.classList.remove("invalid");
+      renderSampleState();
     }
   });
   $("show-entry-editor").addEventListener("click", () => {
@@ -275,6 +280,23 @@ function setupStatic() {
     if (!$("feed").contains(event.relatedTarget)) queueMicrotask(renderFeed);
   });
   $("t-load").addEventListener("click", loadSample);
+  for (const id of ["t-class", "t-quality"]) {
+    $(id).addEventListener("change", () => {
+      sampleRequest++;
+      sampleLoading = false;
+      $("t-load-status").textContent = sampleMatchesSelection() ? "" : "Load the selected sample or use the previously loaded one.";
+      renderSampleState();
+    });
+  }
+  $("t-use-loaded").addEventListener("click", () => {
+    $("t-class").value = loadedSample.requestedClass;
+    $("t-quality").value = loadedSample.quality;
+    $("t-class").dispatchEvent(new Event("change"));
+    $("t-send").focus();
+  });
+  document.querySelectorAll("[name=t-mode]").forEach((radio) => {
+    radio.addEventListener("change", () => { $("t-burst").disabled = radio.value !== "burst"; });
+  });
   $("t-send").addEventListener("click", sendEntry);
   $("dr-close").addEventListener("click", () => closeDrawer());
   document.addEventListener("keydown", (e) => {
@@ -741,17 +763,53 @@ function restoreIncidentFocus(opener) {
 // ------------------------------------------------------------------------- //
 async function loadSample() {
   const c = $("t-class").value, q = $("t-quality").value;
-  const r = await fetch(`/api/sample?cls=${encodeURIComponent(c)}&quality=${q}`);
-  if (!r.ok) return;
-  const s = await r.json();
-  $("t-features").querySelectorAll("input").forEach((inp) => {
-    const v = s.features[inp.dataset.f];
-    inp.value = String(+v.toPrecision(8));
-    inp.dataset.orig = inp.value;
-    inp.classList.remove("changed", "invalid");
-  });
-  $("t-features").dataset.trueClass = s.true_class;
-  $("t-origin").textContent = `Real ${q} row, true class: ${s.true_class}. Edit any value before sending.`;
+  const request = ++sampleRequest;
+  sampleLoading = true;
+  $("t-load-status").textContent = "Loading selected sample…";
+  renderSampleState();
+  try {
+    const response = await fetch(`/api/sample?cls=${encodeURIComponent(c)}&quality=${q}`);
+    if (!response.ok) throw new Error("Sample unavailable");
+    const sample = await response.json();
+    if (request !== sampleRequest) return;
+    const inputs = [...$("t-features").querySelectorAll("input")];
+    const values = inputs.map((input) => sample.features?.[input.dataset.f]);
+    if (!sample.true_class || values.some((value) => !Number.isFinite(value))) throw new Error("Incomplete sample");
+    inputs.forEach((input, index) => {
+      input.value = String(values[index]);
+      input.dataset.orig = input.value;
+      input.classList.remove("changed", "invalid");
+    });
+    loadedSample = { requestedClass: c, quality: q, trueClass: sample.true_class };
+    $("t-load-status").textContent = "Sample loaded.";
+  } catch (_) {
+    if (request !== sampleRequest) return;
+    $("t-load-status").textContent = loadedSample
+      ? "Couldn’t load the selected sample. The previously loaded values are still shown. Select Load sample to retry."
+      : "Couldn’t load the sample. Select Load sample to retry.";
+  } finally {
+    if (request === sampleRequest) {
+      sampleLoading = false;
+      renderSampleState();
+    }
+  }
+}
+
+function sampleMatchesSelection() {
+  return loadedSample?.requestedClass === $("t-class").value && loadedSample.quality === $("t-quality").value;
+}
+
+function editedFeatureCount() {
+  return $("t-features").querySelectorAll(".changed").length;
+}
+
+function renderSampleState() {
+  $("t-send").disabled = runPending || sampleLoading || !sampleMatchesSelection();
+  $("t-use-loaded").hidden = !loadedSample || sampleMatchesSelection();
+  $("t-origin").textContent = loadedSample ? `Source sample: ${loadedSample.trueClass} · ${loadedSample.quality}` : "No sample loaded.";
+  $("t-ground-truth").textContent = loadedSample
+    ? `Ground truth for this entry: ${editedFeatureCount() ? "unavailable after editing" : loadedSample.trueClass}`
+    : "";
 }
 
 function startTracker(kind, ids, label, trueClass) {
@@ -783,7 +841,8 @@ function showSending(label) {
 }
 
 function setRunPending(pending) {
-  $("t-send").disabled = pending;
+  runPending = pending;
+  renderSampleState();
   $("show-simulation").disabled = pending;
 }
 
@@ -799,6 +858,7 @@ function trackRow(r) {
 }
 
 async function sendEntry() {
+  if ($("t-send").disabled) return;
   const feats = {};
   let bad = false;
   $("t-features").querySelectorAll("input").forEach((inp) => {
@@ -818,10 +878,11 @@ async function sendEntry() {
     return;
   }
   const burst = document.querySelector("input[name=t-mode]:checked").value === "burst";
-  const count = burst ? Math.max(2, Math.min(50, +$("t-burst").value || 10)) : 1;
-  const edited = [...$("t-features").querySelectorAll("input.changed")].length;
+  if (burst && !$("t-burst").reportValidity()) return;
+  const count = burst ? $("t-burst").valueAsNumber : 1;
+  const edited = editedFeatureCount();
   // Edited rows have no known ground truth, so don't count them toward accuracy.
-  const trueClass = edited ? null : ($("t-features").dataset.trueClass || null);
+  const trueClass = edited ? null : loadedSample.trueClass;
   const btn = $("t-send");
   setRunPending(true);
   showSending(`${burst ? count + "× " : ""}test entry`);

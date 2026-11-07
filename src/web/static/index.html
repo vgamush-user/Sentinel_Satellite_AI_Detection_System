@@ -173,13 +173,18 @@
         </select>
       </label>
       <button class="btn ghost" id="t-load">Load sample</button>
-      <span class="hint" id="t-origin"></span>
+      <button class="btn ghost" id="t-use-loaded" type="button" hidden>Use loaded sample</button>
     </div>
+    <p class="hint" id="t-origin">No sample loaded.</p>
+    <p class="hint" id="t-ground-truth"></p>
+    <p class="hint" id="t-load-status" role="status"></p>
     <details id="feature-editor"><summary>Edit feature values</summary><div class="features" id="t-features"></div></details>
     <div class="row send-row">
       <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
-      <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst &times; <input id="t-burst" type="number" min="2" max="50" value="10"></label>
-      <button class="btn primary" id="t-send">Send entry</button>
+      <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst</label>
+      <label>Burst row count <input id="t-burst" type="number" min="2" max="50" step="1" value="10" required disabled aria-describedby="t-burst-range"></label>
+      <span class="hint" id="t-burst-range">2–50 rows</span>
+      <button class="btn primary" id="t-send" disabled>Send entry</button>
     </div>
     <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
   </section>
