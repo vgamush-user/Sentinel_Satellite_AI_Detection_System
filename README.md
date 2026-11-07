@@ -10,7 +10,7 @@ an incident report. A live website shows all of it as it happens.
 ```bash
 python scripts/start_all.py --open
 ```
-Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8080.
+Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.
 See [Real-time pipeline](#real-time-pipeline-kafka) below.
 
 ## Project Structure

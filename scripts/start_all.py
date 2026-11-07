@@ -12,7 +12,7 @@ What it does:
   4. prints each service's log lines with a [name] prefix (full logs in
      data/live/logs/), and stops everything on Ctrl+C
 
-Website: http://127.0.0.1:8050    Kafka UI: http://localhost:8080
+Website: http://127.0.0.1:8050    Kafka UI: http://localhost:8081
 """
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def main() -> None:
         time.sleep(0.5)
 
     url = f"http://{WEB_HOST}:{WEB_PORT}"
-    print(f"\n  Sentinel website: {url}\n  Kafka UI:         http://localhost:8080\n"
+    print(f"\n  Sentinel website: {url}\n  Kafka UI:         http://localhost:8081\n"
           f"  Agents: {args.agents} | replay: {args.mode} @ {args.speed:g} rows/s | logs: {LOGS}\n"
           f"  Press Ctrl+C to stop everything.\n", flush=True)
     if args.open:
