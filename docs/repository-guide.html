@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SentinelSat Repository Guide</title>
+<style>
+:root{color-scheme:dark;--bg:#0b121a;--panel:#131f2b;--line:#304252;--ink:#f0f6fc;--muted:#afbfce;--link:#89e0da;--review:#ffd186}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.65 system-ui,sans-serif}
+a{color:var(--link);text-underline-offset:.2em}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible{outline:2px solid var(--review);outline-offset:4px}
+header,main,footer{max-width:75rem;margin:auto;padding:clamp(1rem,4vw,3rem)}header{border-bottom:1px solid var(--line);background:radial-gradient(ellipse at top right,#173c47,transparent 70%)}
+h1,h2,h3,p{margin:0 0 .7em}h1{font-size:clamp(2.4rem,7vw,5rem);line-height:1;letter-spacing:-.055em;margin:.25em 0}h2{font-size:clamp(1.6rem,4vw,2.4rem);line-height:1.15}h3{font-size:1.12rem}
+p{max-width:76ch;color:var(--muted)}nav,.grid{display:flex;flex-wrap:wrap;gap:.75rem}nav a{display:inline-block;padding:.45rem .7rem;border:1px solid var(--line);border-radius:.4rem}
+.eyebrow,.tag,code{font-family:ui-monospace,Consolas,monospace}.eyebrow,.tag{color:var(--link);font-size:.82rem;letter-spacing:.06em}.review{color:var(--review)}section+section{margin-top:3rem}code{overflow-wrap:anywhere}
+.flow{padding:0;list-style:none;display:grid;gap:1.65rem}.flow li,.card,details{background:var(--panel);border:1px solid var(--line);border-radius:.55rem;padding:1rem}.flow li{position:relative}.flow li+li::before{content:"↓";position:absolute;top:-1.72rem;left:1.15rem;color:var(--link)}.flow p,.card p{margin:.35rem 0 0}.grid>.card{flex:1 1 18rem}.grid{margin-bottom:1rem}dl{margin:0}dt{font-weight:700;margin-top:.7rem}dd{margin:0;color:var(--muted)}details+details{margin-top:.65rem}summary{cursor:pointer;font-weight:700}footer{border-top:1px solid var(--line);color:var(--muted)}@media print{:root{color-scheme:light;--bg:white;--panel:white;--line:#bbb;--ink:#111;--muted:#333;--link:#075958;--review:#714600}header{background:none}}
+</style>
+</head>
+<body>
+<header>
+<p class="eyebrow">SENTINELSAT / REPOSITORY GUIDE</p>
+<h1>From telemetry<br>to incident report</h1>
+<p>Follow a row from the CSV through the model and agents, then see how the live Kafka pipeline connects to the same reporting code.</p>
+<nav aria-label="Guide contents"><a href="#paths">Two paths</a><a href="#row">Trace row 2</a><a href="#kafka">Kafka flow</a><a href="#files">File index</a></nav>
+</header>
+<main>
+<section id="paths">
+<h2>Two paths share a model</h2>
+<div class="grid">
+<article class="card"><span class="tag">01 / STANDALONE</span><h3>Gate each row, then classify</h3><p><a href="../src/pipeline/full_pipeline.py">full_pipeline.py</a> drives a CSV simulator, checks for unusual features, and runs the crew on rows that pass. <a href="../src/dashboard/app.py">The Gradio dashboard</a> offers another way to use this workflow.</p></article>
+<article class="card"><span class="tag">02 / STREAMING</span><h3>Classify each row, then group</h3><p><a href="../scripts/start_all.py">start_all.py</a> launches Kafka services and the <a href="../src/web/server.py">FastAPI website</a>. The detector scores every row. An incident must open before the agent worker is called.</p></article>
+</div>
+<p>Both load the same <a href="../src/ml/baseline_xgb.json">XGBoost model</a> and <a href="../src/ml/baseline_feature_order.json">ordered feature list</a>. The standalone monitor uses separate <a href="../src/ml/nominal_baseline_stats.json">nominal statistics</a>.</p>
+</section>
+<section id="row">
+<h2>Trace row 2 from your run</h2>
+<div class="grid">
+<article class="card"><span class="tag">CSV LABEL</span><h3>Data Injection</h3><p><code>true_label=3</code></p></article>
+<article class="card"><span class="tag">MODEL PREDICTION</span><h3>Storage Exhaustion</h3><p>51.49% confidence</p></article>
+<article class="card"><span class="tag review">PIPELINE STATUS</span><h3>Flagged for review</h3><p><code>log_only</code> policy decision</p></article>
+</div>
+<ol class="flow">
+<li><strong>01 · Replay the CSV</strong><p><a href="../src/simulator/telemetry_simulator.py">telemetry_simulator.py</a> reads <a href="../data/noised/noised_dataset.csv">noised_dataset.csv</a>. The <a href="../src/pipeline/full_pipeline.py">runner</a> takes the row with <code>MsgId=6277</code>, passes its 22 features into the pipeline, and keeps the label for console output.</p></li>
+<li><strong>02 · Pass the monitor gate</strong><p><a href="../src/tools/monitor_tool.py">monitor_tool.py</a> compares features with the nominal baseline. This row crossed the escalation threshold and went to the crew.</p></li>
+<li><strong>03 · Predict Storage Exhaustion</strong><p><a href="../src/agents/classifier_agent.py">classifier_agent.py</a> calls <a href="../src/tools/classifier_tool.py">classifier_tool.py</a>. XGBoost gives Storage Exhaustion 51.49%, Normal 28.45%, and Data Injection 20.01%. The agent repeats the tool's winning class and score. The difference from the CSV label originates here.</p></li>
+<li><strong>04 · Add SPARTA context</strong><p><a href="../src/agents/sparta_agent.py">sparta_agent.py</a> uses <a href="../src/tools/sparta_tool.py">sparta_tool.py</a> to map the predicted class to a tactic and technique and retrieve a precedent from the knowledge base.</p></li>
+<li><strong>05 · Look up mitigation</strong><p><a href="../src/agents/mitigation_agent.py">mitigation_agent.py</a> calls <a href="../src/tools/mitigation_tool.py">mitigation_tool.py</a>. At 0.5149 confidence, the policy returns <code>log_only</code>. The function returns an action name and rationale data. The report's claim that logging was executed goes beyond this lookup.</p></li>
+<li><strong>06 · Write the report and print status</strong><p><a href="../src/agents/incident_reporter_agent.py">incident_reporter_agent.py</a> uses <a href="../src/tools/incident_reporter_tool.py">incident_reporter_tool.py</a> to assemble severity and false-positive risk into a record and write the report. The <a href="../src/pipeline/full_pipeline.py">runner</a> separately assigns <code>FLAGGED_FOR_REVIEW</code> because confidence is below the 0.70 action threshold.</p></li>
+</ol>
+</section>
+<section id="kafka">
+<h2>How the Kafka services connect</h2>
+<ol class="flow">
+<li><strong>Publish · <code>telemetry.raw</code></strong><p><a href="../src/streaming/producer.py">producer.py</a> replays CSV rows. <a href="../src/streaming/inject.py">inject.py</a> builds the same messages for the CLI and website endpoints. <a href="../src/streaming/topics.py">topics.py</a> creates the topics, and <a href="../src/streaming/config.py">config.py</a> supplies shared settings.</p></li>
+<li><strong>Score · <code>telemetry.scored</code></strong><p><a href="../src/streaming/detector.py">detector.py</a> reads raw messages, batches inference, and emits the prediction, probabilities, and latency. It loads the native XGBoost model directly.</p></li>
+<li><strong>Group · <code>incidents</code></strong><p><a href="../src/streaming/incident_manager.py">incident_manager.py</a> tracks evidence per satellite. The intended default rule opens an incident after five same-class attack predictions at confidence ≥0.70 among the last 20 rows. A lone row like row 2 would be below the confidence threshold and supply no evidence.</p></li>
+<li><strong>Analyse · <code>reports</code></strong><p><a href="../src/streaming/agent_worker.py">agent_worker.py</a> consumes incident openings. Live mode calls <code>run_pipeline_for_window()</code> on the strongest trigger row. Cached mode reads <a href="../src/pipeline/demo_cache.json">demo_cache.json</a> by incident class. Both publish report events.</p></li>
+<li><strong>Persist and display</strong><p><a href="../src/streaming/recorder.py">recorder.py</a> consumes incident and report events and uses <a href="../src/streaming/storage.py">storage.py</a> to write SQLite. <a href="../src/web/server.py">server.py</a> reads SQLite history and sends recent Kafka activity over WebSocket to <a href="../src/web/static/index.html">index.html</a>, whose <a href="../src/web/static/app.js">app.js</a> renders the events and calls the API.</p></li>
+</ol>
+</section>
+<section id="files">
+<h2>Supporting files and entry points</h2>
+<details open><summary>Data, training, and benchmarks</summary><dl>
+<dt><a href="../data/raw/consolidated_dataset_raw.csv">consolidated_dataset_raw.csv</a> → <a href="../src/ml/train_baseline.py">train_baseline.py</a></dt><dd>Clean rows train the classifier. The training script uses the shared feature columns to write the model and feature order consumed by both paths.</dd>
+<dt><a href="../src/ml/compute_baseline_stats.py">compute_baseline_stats.py</a> → <a href="../src/ml/nominal_baseline_stats.json">nominal_baseline_stats.json</a></dt><dd>Builds the noised Normal baseline used by the monitor.</dd>
+<dt><a href="../notebooks/Satellite_Telemetry_AI_Pipeline.ipynb">ML notebook</a> · <a href="../notebooks/data_reconnaissance.ipynb">Data reconnaissance</a> · <a href="../deployment/onnx/README.md">ONNX benchmark</a></dt><dd>Experiments, dataset exploration, and a separate model export and deployment benchmark.</dd>
+</dl></details>
+<details><summary>Agents, knowledge base, and demo cache</summary><dl>
+<dt><a href="../src/agents/llm_config.py">llm_config.py</a></dt><dd>Provides the shared Groq model and retry behavior for the crew agents.</dd>
+<dt><a href="../src/rag/build_sparta_kb.py">build_sparta_kb.py</a> → <a href="../src/tools/sparta_tool.py">sparta_tool.py</a></dt><dd>Creates the local Chroma knowledge base used for class mapping and incident retrieval.</dd>
+<dt><a href="../src/pipeline/generate_demo_cache.py">generate_demo_cache.py</a> → <a href="../src/pipeline/demo_cache.json">demo_cache.json</a></dt><dd>Precomputes one report per class for the dashboard and cached Kafka worker.</dd>
+<dt><a href="../src/pipeline/monitor_pipeline.py">monitor_pipeline.py</a></dt><dd>Provides a smaller monitor and classifier path for targeted checks.</dd>
+</dl></details>
+<details><summary>Infrastructure and interfaces</summary><dl>
+<dt><a href="../docker-compose.yml">docker-compose.yml</a> · <a href="../scripts/start_all.py">start_all.py</a> · <a href="../requirements.txt">requirements.txt</a></dt><dd>Compose defines the broker and Kafka UI. The launcher starts the host Python processes, whose dependencies are listed in requirements.txt.</dd>
+<dt><a href="../src/dashboard/app.py">Gradio dashboard</a> · <a href="../src/web/static/style.css">Kafka website stylesheet</a></dt><dd>Gradio connects to the simulator. The stylesheet belongs to the separate FastAPI website.</dd>
+<dt><a href="../src/dashboard/dashboard.py">Streamlit dashboard</a> → <a href="../src/ml/app.py">older prediction API</a></dt><dd>A separate five-feature demo whose API expects external scaler and model pickle files. The Kafka stack uses the 22-feature JSON model.</dd>
+</dl></details>
+<details><summary>Tests and project documentation</summary><dl>
+<dt><a href="../tests/test_monitor.py">Monitor</a> · <a href="../tests/test_mitigation_boundaries.py">Mitigation boundaries</a> · <a href="../tests/test_integration_all_scenarios.py">Integration scenarios</a> · <a href="../tests/run_adversarial_tests.py">Adversarial checks</a></dt><dd>Exercise the gate, policy thresholds, five class scenarios, and selected difficult inputs. Integration defaults to cached reports and offers a live Groq option.</dd>
+<dt><a href="../README.md">README</a> · <a href="ARCHITECTURE.md">Architecture notes</a> · <a href="security/known_limitations.md">Known limitations</a></dt><dd>Setup commands, design rationale, and documented failure modes.</dd>
+</dl></details>
+</section>
+</main>
+<footer>Source links are relative to this file in the repository. Open the guide from the checkout to follow them.</footer>
+</body>
+</html>
