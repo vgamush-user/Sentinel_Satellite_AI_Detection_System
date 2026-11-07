@@ -30,6 +30,7 @@ from streaming import inject, storage
 from streaming.topics import ensure_topics
 
 STATIC = Path(__file__).resolve().parent / "static"
+DEMO_CACHE = STATIC.parents[1] / "pipeline" / "demo_cache.json"
 QUALITY = {"clean": "raw", "noisy": "noised"}  # UI name -> dataset key
 CHART_FEATURES = ("MessageRateInWindow", "AverageMessageLengthInWindow", "MemoryAnonMB")
 
@@ -247,6 +248,14 @@ def incident(incident_id: str):
     if inc is None:
         raise HTTPException(404, "incident not found (the recorder may not have stored it yet)")
     return inc
+
+
+@app.get("/api/demo-scenarios")
+def demo_scenarios():
+    """Read-only precomputed walkthroughs. Does not invoke the agent worker."""
+    if not DEMO_CACHE.is_file():
+        raise HTTPException(503, "Cached scenarios are unavailable")
+    return FileResponse(DEMO_CACHE, media_type="application/json")
 
 
 @app.get("/api/sample")

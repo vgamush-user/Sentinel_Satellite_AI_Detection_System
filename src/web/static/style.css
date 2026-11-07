@@ -1,24 +1,27 @@
 :root {
-  color-scheme: dark;
-  --bg: #181922;
-  --panel: #1d1e29;
-  --panel-2: #272936;
-  --line: #323443;
-  --text: #eeeffc;
-  --muted: #a2a5b9;
-  --accent: #aeb0ff;
-  --accent-hover: #6266cc;
-  --primary: #575bc7;
-  --ok: #3ccf8e;
-  --warn: #f5b84d;
-  --bad: #ff6b6b;
-  --bad-text: #ff8080;
-  --c-normal: #6ee7b7;
-  --c-se: #facc15;
-  --c-cf: #fb7185;
-  --c-di: #b48cff;
-  --c-dim: #818cf8;
-  --radius: 6px;
+  color-scheme: light;
+  --bg: #f7f9f7;
+  --panel: #ffffff;
+  --panel-2: #eef4f1;
+  --line: #dce6e1;
+  --text: #19332f;
+  --muted: #52645f;
+  --accent: #237a70;
+  --accent-hover: #1c655c;
+  --primary: #237a70;
+  --focus: #245ddb;
+  --intro: #e0f0ea;
+  --review-bg: #fff3d9;
+  --ok: #237a56;
+  --warn: #986000;
+  --bad: #b83e44;
+  --bad-text: #a12c35;
+  --c-normal: #237a56;
+  --c-se: #986000;
+  --c-cf: #b83e44;
+  --c-di: #6c478c;
+  --c-dim: #346a9b;
+  --radius: 12px;
 
   /* Motion Tokens (Emil Kowalski Design Engineering Standards) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -28,12 +31,35 @@
   --duration-fast: 150ms;
   --duration-enter: 240ms;
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15201e;
+  --panel: #1c2b28;
+  --panel-2: #243632;
+  --line: #3a504a;
+  --text: #e9f4ef;
+  --muted: #b9cdc5;
+  --accent: #8fdbca;
+  --primary: #237a70;
+  --focus: #a4baff;
+  --intro: #243f38;
+  --review-bg: #47351d;
+  --ok: #83d9aa;
+  --warn: #f5ca85;
+  --bad: #ff9ca1;
+  --bad-text: #ffc0c4;
+  --c-normal: #83d9aa;
+  --c-se: #f5ca85;
+  --c-cf: #ff9ca1;
+  --c-di: #d9b2fb;
+  --c-dim: #a9cef4;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh;
 }
 a { color: var(--accent); }
@@ -43,7 +69,7 @@ small, .hint { color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 button, select, input, a {
@@ -65,10 +91,11 @@ button, select, input, a {
 }
 .logo svg { width: 22px; height: 22px; }
 .top {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
   min-height: 55px; padding: 8px 20px; border-bottom: 1px solid var(--line);
 }
-.top h1 { font-size: 15px; font-weight: 650; }
+.top #workspace-mode { margin-left: auto; }
+.top h1 { font-size: 18px; font-weight: 650; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill {
   display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
@@ -116,7 +143,7 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
 .workspace-nav { display: grid; gap: 3px; }
 .workspace-nav .btn {
   display: flex; align-items: center; gap: 9px; padding: 7px 8px;
-  text-align: left; background: transparent; border-color: transparent; color: var(--muted);
+  text-align: left; text-decoration: none; background: transparent; border-color: transparent; color: var(--muted);
 }
 .workspace-nav .btn:hover, .workspace-nav .btn[aria-pressed="true"] {
   background: var(--panel-2); color: var(--text);
@@ -128,7 +155,7 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .card-head h2 { font-size: 15px; }
-.card-head h2[tabindex]:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.card-head h2[tabindex]:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
 
 /* Fixed CSS height: the canvas's pixel size is set from it on every redraw */
 .chart-wrap { position: relative; width: 100%; }
@@ -198,10 +225,10 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .tracker li:not(:last-child)::after { content: ""; position: absolute; left: 10px; top: 24px; bottom: 2px; width: 2px; background: var(--panel-2); }
 .tracker li b { display: block; font-size: 13px; }
 .tracker li span { display: block; color: var(--muted); font-size: 12.5px; word-break: break-word; }
-.tracker li.done::before { content: "\2713"; background: var(--ok); color: #06101f; transform: scale(1.05); }
-.tracker li.run::before { background: var(--warn); color: #06101f; }
+.tracker li.done::before { content: "\2713"; background: var(--ok); color: white; transform: scale(1.05); }
+.tracker li.run::before { background: var(--warn); color: white; }
 .tracker li.no::before { content: "\2013"; background: var(--panel-2); }
-.tracker li.err::before { content: "!"; background: var(--bad); color: #06101f; }
+.tracker li.err::before { content: "!"; background: var(--bad); color: white; }
 .tracker .cls { display: inline; white-space: nowrap; }
 .tracker .cls i { margin-right: 4px; vertical-align: middle; }
 .tracker .linkish { color: var(--accent); cursor: pointer; text-decoration: underline; background: none; border: 0; padding: 0; font: inherit; }
@@ -265,7 +292,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 16px 48px #0006;
 }
-#simulation::backdrop { background: #090911b8; }
+#simulation::backdrop { background: #19332f80; }
 #simulation .hint { margin-bottom: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .close {
@@ -368,4 +395,36 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ---------- guided overview and methodology ---------- */
+.intro-view { max-width: 1420px; padding: 24px clamp(14px, 3vw, 40px) 32px; gap: 20px; }
+.intro {
+  padding: clamp(20px, 4vw, 40px); border: 1px solid var(--line); border-radius: 18px;
+  background: linear-gradient(110deg, var(--intro), var(--panel));
+}
+.eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 14px; font-weight: 700; }
+.intro h2 { max-width: 28ch; font-size: clamp(25px, 3vw, 34px); line-height: 1.2; }
+.intro p:not(.eyebrow) { max-width: 65ch; color: var(--muted); }
+.intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scenarios, .methodology, .session-summary { padding: clamp(14px, 2vw, 24px); }
+.scenarios h2, .methodology h2, .session-summary h2 { font-size: 21px; }
+.scenario-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 172px), 1fr)); gap: 12px; margin-top: 16px; }
+.scenario { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.scenario h3, #scenario-result h3 { margin: 0; font-size: 16px; }
+.scenario p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.scenario button { align-self: start; margin-top: auto; min-height: 44px; font-size: 14px; }
+#scenario-result { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+#scenario-result details { padding: 10px 0; border-top: 1px solid var(--line); }
+#scenario-result summary { cursor: pointer; }
+.session-summary p { margin-bottom: 0; color: var(--muted); }
+.agent-trace { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 22px; padding-left: 24px; }
+.agent-trace li span { display: block; color: var(--muted); font-size: 14px; }
+.evaluation { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.evaluation strong { display: block; font-size: 26px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.review-note { padding: 10px 12px; border-radius: 8px; background: var(--review-bg); color: var(--warn); }
+.incident-meta, .src, .feed td:first-child { font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .agent-trace { grid-template-columns: 1fr; }
+  .top #workspace-mode { margin-left: 0; }
 }

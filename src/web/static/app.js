@@ -3,16 +3,14 @@
 // batches over the /ws WebSocket (telemetry rows, incident and report events).
 
 const palette = getComputedStyle(document.documentElement);
-const COLORS = new Map([
+const CLASS_COLOR_TOKENS = new Map([
   ["Normal", "--c-normal"],
   ["Storage Exhaustion", "--c-se"],
   ["Command Flooding", "--c-cf"],
   ["Data Injection", "--c-di"],
   ["Defence Impairment", "--c-dim"],
-].map(([name, token]) => [name, palette.getPropertyValue(token).trim()]));
-const colorFor = (name) => COLORS.get(name) || "#888";
-const accent = palette.getPropertyValue("--accent").trim();
-const thresholdColor = palette.getPropertyValue("--warn").trim();
+]);
+const classColorToken = (name) => CLASS_COLOR_TOKENS.get(name) || "--muted";
 const chartPad = { l: 34, r: 10, t: 10, b: 20 };
 const liveRowLimit = 300;
 const S = {
@@ -34,10 +32,10 @@ function fmtTime(ts, includeDate = false) {
   return includeDate ? iso.slice(0, 10) + " " + time : time;
 }
 const pct = (v) => v == null ? "–" : (v * 100).toFixed(1) + "%";
-const cls = (name) => `<span class="cls"><i style="background:${colorFor(name)}"></i>${esc(name || "–")}</span>`;
+const cls = (name) => `<span class="cls"><i style="background:var(${classColorToken(name)})"></i>${esc(name || "–")}</span>`;
 
 let drawerSelection = null;
-const workspaces = { live: "Live Monitor", incidents: "Incidents", lab: "Threat Lab" };
+const workspaces = { overview: "Overview", live: "Telemetry", incidents: "Incidents", lab: "Threat Lab", method: "How it works" };
 const incidentFilters = ["incident-search", "incident-class", "incident-state", "incident-report"];
 
 // ------------------------------------------------------------------------- //
@@ -81,10 +79,92 @@ async function boot() {
   loadSample();
 }
 
-function setupStatic() {
+const scenarios = {
+  Normal: "Explore a window with no attack class predicted.",
+  "Storage Exhaustion": "Review patterns of excessive resource use.",
+  "Command Flooding": "Inspect an unusual volume of commands.",
+  "Data Injection": "Review patterns that resemble altered telemetry.",
+  "Defence Impairment": "Explore possible interference with protective mechanisms.",
+};
+
+const confidenceNote = "Model confidence is a score, not the probability that an event is malicious. A high score can still be wrong.";
+
+function setupOverview() {
+  $("theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme !== "dark";
+    root.dataset.theme = dark ? "dark" : "light";
+    $("theme-toggle").setAttribute("aria-pressed", String(dark));
+    drawChart();
+  });
   Object.keys(workspaces).forEach((view) => {
     $("show-" + view).addEventListener("click", () => showWorkspace(view));
   });
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      showWorkspace(button.dataset.view);
+      $("workspace-title").focus();
+    });
+  });
+  const cards = $("scenario-cards");
+  cards.innerHTML = Object.entries(scenarios).map(([name, description]) => `
+    <article class="scenario">
+      <h3>${name}</h3><p>${description}</p>
+      <button type="button" class="btn" aria-label="Explore sample: ${name}" data-scenario="${name}">Explore sample</button>
+    </article>`).join("");
+  let cache;
+  let selection = 0;
+  cards.addEventListener("click", async (event) => {
+    const name = event.target.dataset.scenario;
+    if (!name) return;
+    const request = ++selection;
+    $("scenario-status").textContent = "Loading cached scenario…";
+    try {
+      cache ??= fetch("/api/demo-scenarios").then((response) => {
+        if (!response.ok) throw new Error("Cache unavailable");
+        return response.json();
+      }).catch((error) => { cache = null; throw error; });
+      const example = (await cache)[name];
+      if (!example) throw new Error("Scenario unavailable");
+      if (request !== selection) return;
+      renderScenario(name, example);
+      $("scenario-status").textContent = "";
+    } catch (_) {
+      if (request !== selection) return;
+      $("scenario-status").textContent = "This cached scenario couldn’t load. Try again or open the hosted demo.";
+    }
+  });
+}
+
+function renderScenario(name, example) {
+  const classification = example.classification;
+  const result = $("scenario-result");
+  result.innerHTML = `
+    <div class="card-head"><h3>${esc(name)} walkthrough</h3><span class="badge">Precomputed</span></div>
+    <div class="kv">
+      <div><small>Ground truth (dataset)</small><b>${esc(name)}</b></div>
+      <div><small>Predicted class</small><b>${esc(classification?.predicted_class || "Unavailable")}</b></div>
+      <div><small>Model confidence</small><b>${esc(classification?.confidence ?? "Unavailable")}</b></div>
+      <div><small>Review signal</small><b>${reviewSignal(example.status)}</b></div>
+    </div>
+    <p>${confidenceNote}</p>
+    ${classification?.predicted_class === "Normal" ? "<p>No attack class was predicted. Review the evidence before concluding the window is safe.</p>" : ""}
+    <p class="hint">The cache records outputs, but does not capture Monitor decisions, stage timing or structured policy details.</p>
+    <details><summary>SPARTA context · AI-generated</summary><div class="md">${md(example.sparta_context)}</div></details>
+    <details><summary>Policy explanation · AI-generated</summary><p class="hint">Structured policy details unavailable. The example describes simulated actions.</p><div class="md">${md(example.mitigation)}</div></details>
+    <details><summary>Incident narrative · AI-generated</summary><div class="md">${md(example.report)}</div></details>`;
+  result.hidden = false;
+  if (!$("overview-view").hidden) result.focus();
+}
+
+function reviewSignal(status) {
+  if (status === "FLAGGED_FOR_REVIEW") return "Awaiting review";
+  if (status === "ERROR") return "Analysis failed";
+  if (status === "AUTONOMOUS") return "Policy result available for review";
+  return "Unavailable";
+}
+
+function setupStatic() {
   document.querySelectorAll(".pipeline button[data-target]").forEach((button) => {
     button.addEventListener("click", () => {
       showWorkspace(button.dataset.target === "incidents-heading" ? "incidents" : "live");
@@ -98,7 +178,7 @@ function setupStatic() {
   $("pc-guard").textContent = `${g.min_rows} of ${g.window_rows} rows ≥ ${g.min_confidence}`;
   $("st-mode").textContent = S.config.agent_mode;
 
-  $("legend").innerHTML = S.config.classes.map((c) => `<span><i style="background:${colorFor(c)}"></i>${esc(c)}</span>`).join("");
+  $("legend").innerHTML = S.config.classes.map((c) => `<span><i style="background:var(${classColorToken(c)})"></i>${esc(c)}</span>`).join("");
 
   const attackOptions = S.config.classes.filter((c) => c !== "Normal")
     .map((c) => `<option>${esc(c)}</option>`).join("");
@@ -164,6 +244,10 @@ function showWorkspace(view) {
     $("show-" + name).setAttribute("aria-pressed", String(name === view));
   });
   $("workspace-title").textContent = workspaces[view];
+  $("workspace-mode").textContent = {
+    overview: "Cached demo", live: "Telemetry replay", incidents: "Replay and test incidents",
+    lab: "Simulated testing", method: "Project methodology",
+  }[view];
   $("show-simulation").hidden = view !== "lab";
   if (view === "live") drawChart();
 }
@@ -179,6 +263,7 @@ function connect() {
   ws.onclose = () => {
     clearInterval(ping);
     $("pill-kafka").classList.remove("ok");
+    $("kafka-status").textContent = "Reconnecting to replay";
     setTimeout(connect, 2000);
   };
 }
@@ -255,6 +340,7 @@ function flash(id) {
 // ------------------------------------------------------------------------- //
 function renderStats(s) {
   $("pill-kafka").classList.toggle("ok", !!s.kafka_ok);
+  $("kafka-status").textContent = s.kafka_ok ? "Kafka connected" : "Kafka disconnected";
   $("st-rate").textContent = s.rows_per_sec;
   $("st-acc").textContent = pct(s.accuracy);
   const dataset = s.replay_dataset;
@@ -262,6 +348,7 @@ function renderStats(s) {
     : dataset === "noised" ? "Noised telemetry" : dataset || "unknown";
   $("st-lat").textContent = s.latency_p50_ms == null ? "–" : Math.round(s.latency_p50_ms) + " ms";
   $("pc-rows").textContent = s.rows_total.toLocaleString();
+  $("overview-session").textContent = `${$("st-dataset").textContent} · ${s.rows_total.toLocaleString()} rows scored · ${s.rows_per_sec} rows/s`;
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rep").textContent = (s.counts.reports_finished || 0).toLocaleString();
 }
@@ -320,6 +407,9 @@ function drawChart() {
   const pad = chartPad;
   const { rows, x, y } = chartLayout(W, H);
   const evidence = S.evidence;
+  const accent = palette.getPropertyValue("--accent").trim();
+  const muted = palette.getPropertyValue("--muted").trim();
+  const colors = new Map([...CLASS_COLOR_TOKENS].map(([name, token]) => [name, palette.getPropertyValue(token).trim()]));
 
   if (evidence) {
     const start = Math.max(pad.l, x(evidence.first) - 5);
@@ -333,7 +423,7 @@ function drawChart() {
   }
 
   g.font = "11px system-ui, sans-serif";
-  g.fillStyle = palette.getPropertyValue("--muted");
+  g.fillStyle = muted;
   g.strokeStyle = palette.getPropertyValue("--line");
   g.lineWidth = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
@@ -341,10 +431,6 @@ function drawChart() {
     g.fillText(v.toFixed(2), 2, y(v) + 4);
   });
   const thr = S.config ? S.config.guards.min_confidence : 0.7;
-  g.setLineDash([5, 4]); g.strokeStyle = thresholdColor;
-  g.beginPath(); g.moveTo(pad.l, y(thr)); g.lineTo(W - pad.r, y(thr)); g.stroke();
-  g.setLineDash([]);
-  g.fillStyle = thresholdColor; g.fillText("evidence ≥ " + thr, W - pad.r - 84, y(thr) - 4);
 
   g.strokeStyle = "rgba(143,160,187,.35)"; g.beginPath();
   rows.forEach((r, i) => (i ? g.lineTo(x(i), y(r.threat)) : g.moveTo(x(i), y(r.threat))));
@@ -352,10 +438,10 @@ function drawChart() {
   rows.forEach((r, i) => {
     const passesGuard = r.predicted_class !== "Normal" && r.confidence >= thr;
     const rad = passesGuard ? 4 : 2.2;
-    g.fillStyle = colorFor(r.predicted_class);
+    g.fillStyle = colors.get(r.predicted_class) || muted;
     g.beginPath(); g.arc(x(i), y(r.threat), rad, 0, Math.PI * 2); g.fill();
     if (r.source !== "replay") {
-      g.strokeStyle = "#e6ecf5"; g.lineWidth = 1.2;
+      g.strokeStyle = muted; g.lineWidth = 1.2;
       g.beginPath(); g.arc(x(i), y(r.threat), rad + 2.5, 0, Math.PI * 2); g.stroke();
     }
     if (evidence?.triggerIds.has(r.entry_id)) {
@@ -367,7 +453,7 @@ function drawChart() {
       g.beginPath(); g.arc(x(i), y(r.threat), rad + 5, 0, Math.PI * 2); g.stroke();
     }
   });
-  g.fillStyle = "#8fa0bb";
+  g.fillStyle = muted;
   g.fillText(evidence ? "snapshot start" : "older", pad.l, H - 5);
   g.textAlign = "right";
   g.fillText(evidence ? "snapshot end" : "now", W - pad.r, H - 5);
@@ -407,7 +493,7 @@ function returnToLive() {
   S.evidence = null;
   $("chart-evidence").hidden = true;
   $("chart-tip").classList.remove("visible");
-  $("chart-heading").textContent = "Live telemetry";
+  $("chart-heading").textContent = "Telemetry replay";
   $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
   drawChart();
   $("chart-heading").focus();
@@ -425,6 +511,8 @@ function reportState(i) {
 
 function agentBadge(i) {
   const state = reportState(i);
+  if (state === "ready" && i.report_mode === "cached") return '<span class="badge">Cached example</span>';
+  if (state === "ready" && i.report_status === "FLAGGED_FOR_REVIEW") return '<span class="badge run">Awaiting review</span>';
   const labels = { queued: "AI queued", running: "AI analysing", error: "AI error", ready: "Report ready" };
   const styles = { running: "run", error: "err", ready: "done" };
   return `<span class="badge ${styles[state] || ""}">${labels[state]}</span>`;
@@ -520,42 +608,51 @@ function renderDrawer() {
   const i = S.incidents.get(id) || {};
   const triggerIds = new Set(i.trigger_entry_ids || []);
   const matching = rows.map((row, index) => triggerIds.has(row.entry_id) ? index : -1).filter((index) => index >= 0);
-  const evidenceSummary = triggerIds.size ? `${matching.length} of ${triggerIds.size} trigger rows available in the live buffer.`
+  const evidenceSummary = triggerIds.size ? `${matching.length} of ${triggerIds.size} trigger rows available in the replay buffer.`
     : "No trigger rows recorded for this incident.";
   const evidenceFocused = document.activeElement?.id === "view-trigger-rows";
   const status = i.report_status;
+  const cached = i.report_mode === "cached";
+  const provenance = cached ? "Cached example for this class" :
+    i.report_mode === "live" ? "Live analysis of the incident sample window" : "Report source unavailable";
   const reportBody = !status
     ? `<p class="empty">Queued: the agent worker analyses one incident at a time.</p>`
     : status === "RUNNING"
-      ? `<p class="empty">The 4 agents are working on this incident (started ${fmtTime(i.report_started_ts, true)}). On the Groq free tier this takes about 1–2 minutes.</p>`
+      ? `<p class="empty">${cached ? "Loading a cached example…" : "Analysis in progress…"} Started ${fmtTime(i.report_started_ts, true)}.</p>`
+      : status === "ERROR"
+        ? `<p class="empty">The report could not finish. Review the captured telemetry evidence.</p>`
       : `${md(i.report)}`;
   $("dr-body").innerHTML = `
     <div class="dr-head">
-      <h3 id="dr-title">${cls(i.attack_class)} <span class="m">${esc(id)}</span></h3>
+      <h3 id="dr-title">Predicted: ${cls(i.attack_class)} <span class="m">${esc(id)}</span></h3>
       <span>${i.status === "open" ? `<span class="badge open">open</span>` : `<span class="badge">closed</span>`} ${agentBadge(i)}</span>
     </div>
+    <p class="hint">${provenance}${cached ? " · Precomputed from a different window." : ""}</p>
+    ${!cached && status === "FLAGGED_FOR_REVIEW" ? '<p class="review-note">Awaiting review · Check the evidence before interpreting the policy outcome.</p>' : ""}
     <div class="kv">
       <div><small>Opened</small><b>${fmtTime(i.opened_ts, true)}</b></div>
       ${i.closed_ts != null ? `<div><small>Closed</small><b>${fmtTime(i.closed_ts, true)}</b></div>` : ""}
       <div><small>Rows</small><b>${i.row_count ?? "–"}</b></div>
-      <div><small>Peak confidence</small><b>${(i.peak_confidence ?? 0).toFixed(4)}</b></div>
-      <div><small>Mean confidence</small><b>${(i.mean_confidence ?? 0).toFixed(4)}</b></div>
-      <div><small>Duration</small><b>${i.duration_sec != null ? i.duration_sec + " s" : "ongoing"}</b></div>
-      <div><small>Sample row true class</small><b>${esc(i.sample_true_class || "unknown")}</b></div>
+      <div><small>Peak confidence</small><b>${i.peak_confidence?.toFixed(4) ?? "Unavailable"}</b></div>
+      <div><small>Mean confidence</small><b>${i.mean_confidence?.toFixed(4) ?? "Unavailable"}</b></div>
+      <div><small>Duration</small><b>${i.duration_sec != null ? i.duration_sec + " s" : i.status === "open" ? "Ongoing" : "Unavailable"}</b></div>
+      <div><small>Ground truth (dataset)</small><b>${esc(i.sample_true_class || "unknown")}</b></div>
       ${status && status !== "RUNNING" ? `
-      <div><small>Agent verdict</small><b>${esc(status)}</b></div>
+      <div><small>Review signal</small><b>${cached ? "Unavailable for this incident" : reviewSignal(status)}</b></div>
       <div><small>Agent classification</small><b>${esc(i.report_predicted_class || "–")} ${i.report_confidence != null ? "(" + i.report_confidence + ")" : ""}</b></div>
-      <div><small>Analysis time</small><b>${i.report_runtime_sec ?? "–"} s · ${esc(i.report_mode || "")}</b></div>` : ""}
+      <div><small>Analysis time</small><b>${i.report_runtime_sec != null ? i.report_runtime_sec + " s" : "Unavailable"}</b></div>` : ""}
     </div>
     ${i.close_reason ? `<p class="hint">Closed: ${esc(i.close_reason)}</p>` : ""}
     <div class="section"><h4>Telemetry evidence</h4>
       <p class="hint">${evidenceSummary}</p>
       ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
     </div>
-    <div class="section"><h4>Incident report</h4><div class="md">${reportBody}</div></div>
-    ${status && status !== "RUNNING" ? `
-    <div class="section"><h4>SPARTA threat context</h4><div class="md">${md(i.sparta_context)}</div></div>
-    <div class="section"><h4>Mitigation</h4><div class="md">${md(i.mitigation)}</div></div>` : ""}`;
+    <p class="hint">${confidenceNote} Per-window feature attribution is unavailable in this build.</p>
+    ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Why review matters: Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}
+    <div class="section"><h4>Incident narrative · AI-generated</h4><div class="md">${reportBody}</div></div>
+    ${status && status !== "RUNNING" && status !== "ERROR" ? `
+    <div class="section"><h4>SPARTA threat context · AI-generated</h4><div class="md">${md(i.sparta_context)}</div></div>
+    <div class="section"><h4>Policy explanation · AI-generated</h4><p class="hint">Structured policy details unavailable. This describes a simulated policy outcome.</p><div class="md">${md(i.mitigation)}</div></div>` : ""}`;
   const button = $("view-trigger-rows");
   button?.addEventListener("click", () => showEvidence(selection, triggerIds, matching));
   if (evidenceFocused) (button ?? $("dr-close")).focus({ preventScroll: true });
@@ -762,4 +859,11 @@ function renderTracker() {
 // Keep the "analysing… Ns" timer ticking.
 setInterval(() => { const t = S.tracker; if (t && t.incidentId) renderTracker(); }, 1000);
 
-boot();
+setupOverview();
+boot().catch(() => {
+  $("overview-session").textContent = "Replay status unavailable. Reload to reconnect.";
+  $("incidents").textContent = "Incidents could not be loaded. Reload to try again.";
+  $("show-simulation").disabled = true;
+  $("t-send").disabled = true;
+  $("t-load").disabled = true;
+});
