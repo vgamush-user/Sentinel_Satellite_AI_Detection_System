@@ -7,9 +7,9 @@ xgboost
 chromadb
 gradio>=5.0
 fastapi
-uvicorn
+uvicorn[standard]       # [standard] adds websockets for the live website
+confluent-kafka>=2.6    # real-time pipeline (src/streaming)
 streamlit
 scikit-learn
 joblib
 shap
-spaces

@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 chroma_sparta/
+# real-time pipeline: SQLite history + service logs
+data/live/

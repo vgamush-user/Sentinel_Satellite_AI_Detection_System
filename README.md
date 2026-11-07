@@ -1,12 +1,17 @@
----
-title: Sentinel Satellite
-emoji: 🛰️
-colorFrom: blue
-colorTo: indigo
-sdk: gradio
-app_file: deployment/huggingface/space_app.py
-pinned: false
----
+# Sentinel Satellite AI Detection System
+
+Real-time intrusion detection for satellite telemetry. Telemetry streams
+through **Apache Kafka**, an **XGBoost** model scores every row, attack bursts
+are grouped into **incidents**, and a crew of **4 AI agents** (CrewAI on Groq)
+maps each incident to SPARTA, picks the policy-mandated mitigation and writes
+an incident report. A live website shows all of it as it happens.
+
+**Quick start (real-time system):** start Docker Desktop, then
+```bash
+python scripts/start_all.py --open
+```
+Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8080.
+See [Real-time pipeline](#real-time-pipeline-kafka) below.
 
 ## Project Structure
 ``` 
@@ -16,6 +21,10 @@ Sentinel_Satellite_AI_Detection_System/
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
+├── docker-compose.yml                   # Kafka (KRaft) + Kafka UI for the real-time pipeline
+│
+├── scripts/
+│   └── start_all.py                     # one command: Kafka + every streaming service + website
 │
 ├── docs/
 │   ├── architecture.md                  # agent roster + data flow diagram
@@ -79,7 +88,22 @@ Sentinel_Satellite_AI_Detection_System/
 │   │   └── monitor_pipeline.py
 │   │
 │   ├── dashboard/
-│   │   └── app.py
+│   │   └── app.py                       # Gradio dashboard (manual, click-to-analyse)
+│   │
+│   ├── streaming/                       # real-time Kafka pipeline
+│   │   ├── config.py                    # topics, guards, settings (all overridable via env)
+│   │   ├── topics.py                    # creates the 4 Kafka topics
+│   │   ├── producer.py                  # replays a CSV into telemetry.raw
+│   │   ├── inject.py                    # shared entry point (+ CLI) for new telemetry
+│   │   ├── detector.py                  # XGBoost on every row -> telemetry.scored
+│   │   ├── incident_manager.py          # groups attack rows into incidents
+│   │   ├── agent_worker.py              # 4-agent crew per incident -> reports
+│   │   ├── recorder.py                  # incidents + reports -> SQLite
+│   │   └── storage.py                   # SQLite schema + queries
+│   │
+│   ├── web/                             # live website (FastAPI + WebSocket)
+│   │   ├── server.py
+│   │   └── static/                      # index.html, app.js, style.css
 │   │
 │   └── reports/
 │       └── cybersecurity_lead_report.md
@@ -88,27 +112,12 @@ Sentinel_Satellite_AI_Detection_System/
 │   ├── test_monitor.py
 │   └── test_mitigation_boundaries.py
 │
-├── .github/
-│   └── workflows/
-│       └── deploy-hf-space.yml          # CI: push to main -> verify -> deploy to the HF Space
-│
 └── deployment/
-    ├── huggingface/                     # HF Spaces config, Week 5 (Software/Integration Lead)
-    │   ├── space_app.py                 # Space entrypoint: builds the SPARTA KB on cold start, then launches src/dashboard/app.py's `demo`
-    │   ├── requirements.txt             # trimmed Space-only deps (no streamlit/fastapi/uvicorn/shap)
-    │   ├── README.md                    # Space card (YAML frontmatter) to merge into the pushed README.md
-    │   ├── DEPLOY.md                    # step-by-step push guide, secrets, known free-tier constraints
-    │   └── verify_space_ready.py        # pre-push integration check — run before every deploy
     └── onnx/                            # stretch-goal quantization, Week 5
 
 
 
 ```
-
-## Currently Deployed HuggingFace Link
-
-
-https://huggingface.co/spaces/Amuthavel2402/Sentinel_Satellite
 
 ## Setup & Running — Agent Pipeline (Agentic AI Lead components)
 
@@ -163,11 +172,55 @@ python tests/test_monitor.py
 python tests/test_mitigation_boundaries.py
 ```
 
-### 9. Deploy to Hugging Face Spaces (Week 5)
-See `deployment/huggingface/DEPLOY.md` for the full walkthrough. Short version:
-```bash
-python deployment/huggingface/verify_space_ready.py   # pre-push integration check
-# then follow DEPLOY.md steps 1-6 to create the Space, set the GROQ_API_KEY
-# secret, and push -- or let .github/workflows/deploy-hf-space.yml do it on
-# every push to main once HF_TOKEN / HF_SPACE_REPO are configured.
+## Real-time pipeline (Kafka)
+
 ```
+ CSV replay / website / API / CLI
+            │
+            ▼
+   telemetry.raw ──► Detector (XGBoost, every row) ──► telemetry.scored ──► website (live chart)
+                                                              │
+                                                              ▼
+                                         Incident manager (false-alarm guards)
+                                                              │
+                                                              ▼
+                     incidents ──► Agent worker (4 CrewAI agents on Groq, one per incident) ──► reports
+                         │                                                                       │
+                         └──────────────► Recorder ──► SQLite history ◄──────────────────────────┘
+```
+
+Each box is a separate process; they only talk through Kafka topics. Detection
+is milliseconds per row and never waits for the LLM. Groq is called **once per
+incident**, not per row, so its cost grows with the number of attacks, not the
+volume of telemetry. If several incidents open at once they queue in Kafka.
+
+### Run it
+Requires Docker Desktop (running) and `GROQ_API_KEY` in `.env` for live agents.
+```bash
+pip install -r requirements.txt
+python scripts/start_all.py --open                 # live agents on Groq
+python scripts/start_all.py --agents cached        # offline demo: stored reports, no Groq calls
+python scripts/start_all.py --speed 20 --mode all  # replay every row (attacks come as long blocks)
+```
+`Ctrl+C` stops the services; `docker compose down` stops Kafka. Logs: `data/live/logs/`.
+
+### Sending new entries
+Every entry point writes to `telemetry.raw`, exactly like the replay:
+- **Website → Test a new entry:** load a real row (pick a class, clean or noisy), edit any of the 22 features, send once or as a burst, and follow it through detection → incident → AI report.
+- **Website → Launch an attack:** one click sends a burst of real attack rows.
+- **HTTP:** `POST /api/ingest` with `{"features": {...22 features...}, "count": 1}`.
+- **CLI:** `cd src && python -m streaming.inject --cls "Command Flooding" --count 15`
+
+### Incident rules (false-alarm guards)
+A row counts as attack evidence only if XGBoost predicts a non-Normal class with
+confidence ≥ 0.7. An incident opens when **5 of the last 20 rows** are evidence of
+the same class ("K of the last N", because attack rows arrive interleaved with
+normal traffic), and closes after 40 rows (or 30 s) without that class. The class
+always comes from XGBoost; the agents explain and respond, they don't re-decide it.
+
+Tuned on the datasets: 0 false incidents over 3 loops of the Normal replay;
+clean attack bursts open exactly one correct incident 100% of the time. On the
+noised dataset the model is ~69% accurate and many noisy attack rows stay below
+the confidence guard, so noisy bursts are caught only 17–48% of the time. The
+website lets you compare clean vs noisy attacks live. All thresholds can be
+changed with environment variables (see `src/streaming/config.py`).
