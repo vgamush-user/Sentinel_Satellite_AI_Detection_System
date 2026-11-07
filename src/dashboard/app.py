@@ -127,32 +127,32 @@ CONFIDENCE_NOTE = (
 )
 
 
-def result_summary(mode, dataset_label, prediction, confidence, status):
+def result_summary(mode, dataset_label, prediction, confidence, status, evidence):
     review = {
         "FLAGGED_FOR_REVIEW": "Awaiting review",
         "AUTONOMOUS": "Policy result available for review",
         "ERROR": "Analysis failed",
     }.get(status, "Unavailable")
     return (
-        f"**{mode}**  \n"
-        f"**Ground truth (dataset):** {dataset_label}  \n"
+        f"**{mode}**\n\n### Prediction and review\n\n"
         f"**Predicted class:** {prediction or 'Unavailable'}  \n"
         f"**Model confidence:** {confidence if confidence is not None else 'Unavailable'}  \n"
         f"**Review signal:** {review}\n\n{CONFIDENCE_NOTE}"
         + ("\n\nNo attack class was predicted. This is not a guarantee of safety."
            if prediction == "Normal" else "")
+        + f"\n\n### Evidence\n\n**Ground truth (dataset):** {dataset_label}  \n{evidence}"
     )
 
 
 def do_run_agent_pipeline():
     """Analyze the latest replay row only on explicit request."""
     if not os.environ.get("GROQ_API_KEY"):
-        yield "Live analysis is unavailable on this server. Try a cached scenario in Overview.", gr.skip(), gr.skip()
+        yield "Live analysis is unavailable on this server. Try a cached scenario in Overview.", gr.skip(), gr.skip(), gr.skip()
         return
 
     snap = sim.snapshot()
     if snap.last_row is None:
-        yield "No telemetry window selected. Start playback in Telemetry first.", gr.skip(), gr.skip()
+        yield "No telemetry window selected. Start playback in Telemetry first.", gr.skip(), gr.skip(), gr.skip()
         return
 
     row = snap.last_row
@@ -162,7 +162,7 @@ def do_run_agent_pipeline():
     monitor = ("Monitor: escalation criteria met." if should_escalate(window)
                else "Monitor: did not escalate. Analysis requested manually.")
     window_note = f"Replay window selected at submission · message ID {int(window['MsgId'])}."
-    yield f"**Live analysis running**\n\n{window_note} {monitor}", gr.skip(), gr.skip()
+    yield f"**Live analysis running**\n\n{window_note} {monitor}", gr.skip(), gr.skip(), gr.skip()
 
     try:
         result = run_pipeline_for_window(window)
@@ -172,7 +172,7 @@ def do_run_agent_pipeline():
             limited = any(term in diagnostic for term in ("rate limit", "rate_limit", "429"))
             reason = ("The analysis provider is temporarily rate-limited. Wait and try again."
                       if limited else "The analysis returned incomplete or invalid output. Try again or explore a cached scenario.")
-            yield f"**Analysis failed.** {reason} Your previous result is still available.\n\n{monitor}", gr.skip(), gr.skip()
+            yield f"**Analysis failed.** {reason} Your previous result is still available.\n\n{monitor}", gr.skip(), gr.skip(), gr.skip()
             return
         prediction, confidence = classification.predicted_class, classification.confidence
         policy = decide_mitigation(prediction, confidence)
@@ -180,23 +180,18 @@ def do_run_agent_pipeline():
                        if "action" in policy else "Policy details unavailable.")
         if result["status"] == "FLAGGED_FOR_REVIEW":
             policy_text += " The run was flagged for review."
-        summary = result_summary("Live analysis · Replay window", dataset_label, prediction, confidence, result["status"])
-        details = (
-            f"### Stage outputs\n\n"
-            f"1. **Monitor:** {monitor.removeprefix('Monitor: ')}\n"
-            f"2. **Classifier:** {prediction} · score {confidence}\n"
-            f"3. **SPARTA Analyst:** {'Context returned' if result.get('sparta_context') else 'Unavailable'}\n"
-            f"4. **Mitigation:** {policy_text}\n"
-            f"5. **Incident Reporter:** {'Narrative returned' if result.get('report') else 'Unavailable'}\n\n"
-            f"### SPARTA context · AI-generated\n{result.get('sparta_context') or 'Unavailable'}\n\n"
-            f"### Policy explanation · AI-generated\n{result.get('mitigation') or 'Unavailable'}\n\n"
-            f"### Incident narrative · AI-generated\n{result.get('report') or 'Unavailable'}\n\n"
-            "Policy outputs describe simulated actions. Per-window feature attribution is unavailable."
+        summary = result_summary("Live analysis · Replay window", dataset_label, prediction, confidence,
+                                 result["status"], f"{window_note} {monitor}")
+        policy_summary = f"### Policy outcome\n\n{policy_text} Policy outputs describe simulated actions."
+        narrative = (
+            f"#### Incident narrative\n{result.get('report') or 'Unavailable'}\n\n"
+            f"#### SPARTA threat context\n{result.get('sparta_context') or 'Unavailable'}\n\n"
+            f"#### Policy explanation\n{result.get('mitigation') or 'Unavailable'}"
         )
-        yield "Analysis complete. Review the result below.", f"{summary}\n\n{window_note} {monitor}", details
+        yield "Analysis complete.", summary, policy_summary, narrative
     except Exception as exc:
         print(f"[dashboard] agent pipeline failed: {exc!r}")
-        yield "This analysis couldn’t finish. Your previous result is still available. Try again or explore a cached scenario.", gr.skip(), gr.skip()
+        yield "This analysis couldn’t finish. Your previous result is still available. Try again or explore a cached scenario.", gr.skip(), gr.skip(), gr.skip()
 
 
 def do_show_demo_example(class_name: str):
@@ -204,17 +199,21 @@ def do_show_demo_example(class_name: str):
     try:
         entry = json.loads(DEMO_CACHE_PATH.read_text(encoding="utf-8"))[class_name]
         classification = entry.get("classification") or {}
-        summary = result_summary("Cached demo · Precomputed", class_name, classification.get("predicted_class"),
-                                 classification.get("confidence"), entry["status"])
+        summary = result_summary(
+            "Cached example", class_name, classification.get("predicted_class"),
+            classification.get("confidence"), entry["status"],
+            "Raw telemetry and the Monitor decision are unavailable for this cached example.",
+        )
         return (
-            summary + "\n\nMonitor decisions and structured policy details are unavailable for this cached example.",
-            f"### SPARTA context · AI-generated\n{entry.get('sparta_context') or 'Unavailable'}\n\n"
-            f"### Policy explanation · AI-generated\n{entry.get('mitigation') or 'Unavailable'}\n\n"
-            f"### Incident narrative · AI-generated\n{entry.get('report') or 'Unavailable'}\n\n"
-            "Policy outputs describe simulated actions. Per-window feature attribution is unavailable.",
+            summary,
+            "### Policy outcome\n\nStructured policy details are unavailable. "
+            "The cached explanation describes simulated actions.",
+            f"#### Incident narrative\n{entry.get('report') or 'Unavailable'}\n\n"
+            f"#### SPARTA threat context\n{entry.get('sparta_context') or 'Unavailable'}\n\n"
+            f"#### Policy explanation\n{entry.get('mitigation') or 'Unavailable'}",
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return "This cached scenario couldn’t load. Try again or select another example.", gr.skip()
+        return "This cached scenario couldn’t load. Try again or select another example.", gr.skip(), gr.skip()
 
 
 def poll(metric_a, metric_b):
@@ -308,7 +307,8 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
                     gr.Markdown(f"**{name}**")
                     demo_buttons.append(gr.Button(f"Explore sample: {name}"))
         demo_header = gr.Markdown("")
-        with gr.Accordion("Read the stage outputs", open=False):
+        demo_policy = gr.Markdown("")
+        with gr.Accordion("AI narrative", open=False):
             demo_report = gr.Markdown("")
     with gr.Tab("Telemetry"):
         gr.Markdown("## Telemetry replay\nRows are replayed from a simulated telemetry dataset.")
@@ -366,9 +366,17 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
             gr.Markdown("Live analysis is unavailable on this server. Cached examples are available in Overview.")
         analysis_status = gr.Markdown("")
         analysis_header = gr.Markdown("")
-        analysis_report = gr.Markdown("")
+        analysis_policy = gr.Markdown("")
+        with gr.Accordion("AI narrative", open=False):
+            analysis_report = gr.Markdown("")
     with gr.Tab("How it works"):
         gr.Markdown(
+            "## Hosted demo · Five-stage analysis\n"
+            "The statistical Monitor screens the replayed window. On request, the Classifier, "
+            "SPARTA Analyst, Mitigation and Incident Reporter return outputs for review.\n\n"
+            "## Web workspace · Kafka telemetry replay\n"
+            "The separate web workspace scores replay and test rows, then opens incidents "
+            "using its configured confidence and row-count guards.\n\n"
             "## Reported model evaluation\n"
             "**68.9% domain-shift accuracy · 0.697 macro F1.** The project report describes training "
             "on clean simulated telemetry and evaluating on noised telemetry. Near-perfect clean "
@@ -391,9 +399,9 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
     order_mode.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
     loop.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
 
-    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_status, analysis_header, analysis_report])
+    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_status, analysis_header, analysis_policy, analysis_report])
     for btn, name in zip(demo_buttons, DEMO_CLASS_NAMES):
-        btn.click(lambda n=name: do_show_demo_example(n), inputs=[], outputs=[demo_header, demo_report])
+        btn.click(lambda n=name: do_show_demo_example(n), inputs=[], outputs=[demo_header, demo_policy, demo_report])
 
     timer = gr.Timer(0.5)
     timer.tick(
