@@ -1,14 +1,7 @@
 """
 app.py
 ------
-Gradio dashboard for the Telemetry-Replay Simulator (v1).
-
-Connects to TelemetryReplaySimulator and visualizes the live stream:
-live table of the most recent messages, rolling metric charts, and
-basic run stats. This is purely a *viewer* — there is no anomaly
-detection / agent logic here yet. The ground-truth "Label" column from
-the dataset is shown as-is (it's part of the CSV) but nothing in this
-app interprets or acts on it.
+Gradio walkthrough and manual analysis for replayed CubeSat telemetry.
 
 Run:
     pip install -r requirements.txt
@@ -22,6 +15,7 @@ from __future__ import annotations
 import sys
 import os
 import json
+from inspect import signature
 from pathlib import Path
 from collections import deque
 
@@ -34,6 +28,7 @@ import pandas as pd
 from simulator.telemetry_simulator import TelemetryReplaySimulator
 from tools.monitor_tool import should_escalate, FEATURE_ORDER
 from pipeline.full_pipeline import run_pipeline_for_window
+from tools.mitigation_tool import decide_mitigation
 
 
 # NOTE: defaults to the NOISED dataset, not raw. The Monitor Agent's baseline
@@ -126,86 +121,100 @@ def do_apply_speed(speed, order_mode, loop, buffer_size):
     )
 
 
-def do_run_agent_pipeline():
-    """Manual trigger: runs the full 4-agent Groq pipeline on the most
-    recently streamed row. Deliberately NOT automatic on every tick -- each
-    run costs 4 Groq calls, so this is a click-to-run "demo mode" action,
-    matching the project's cost-aware design (don't call the LLM on every
-    packet, and don't burn a reviewer's Groq quota without them asking).
+CONFIDENCE_NOTE = (
+    "Model confidence is a score, not the probability that an event is malicious. "
+    "A high score can still be wrong."
+)
 
-    A generator, so the UI shows a "running" message immediately instead of
-    sitting blank for the 1-2 minutes a free-tier Groq run takes. Every
-    message must be yielded: a `return value` in a generator is discarded."""
+
+def result_summary(mode, dataset_label, prediction, confidence, status):
+    review = {
+        "FLAGGED_FOR_REVIEW": "Awaiting review",
+        "AUTONOMOUS": "Policy result available for review",
+        "ERROR": "Analysis failed",
+    }.get(status, "Unavailable")
+    return (
+        f"**{mode}**  \n"
+        f"**Ground truth (dataset):** {dataset_label}  \n"
+        f"**Predicted class:** {prediction or 'Unavailable'}  \n"
+        f"**Model confidence:** {confidence if confidence is not None else 'Unavailable'}  \n"
+        f"**Review signal:** {review}\n\n{CONFIDENCE_NOTE}"
+        + ("\n\nNo attack class was predicted. This is not a guarantee of safety."
+           if prediction == "Normal" else "")
+    )
+
+
+def do_run_agent_pipeline():
+    """Analyze the latest replay row only on explicit request."""
     if not os.environ.get("GROQ_API_KEY"):
-        yield (
-            "Live analysis is unavailable: `GROQ_API_KEY` is not configured on this server. "
-            "Use the Demo Mode buttons below for cached examples.",
-            "",
-        )
+        yield "Live analysis is unavailable on this server. Try a cached scenario in Overview.", gr.skip(), gr.skip()
         return
 
     snap = sim.snapshot()
     if snap.last_row is None:
-        yield "No rows streamed yet — start the simulator first.", ""
+        yield "No telemetry window selected. Start playback in Telemetry first.", gr.skip(), gr.skip()
         return
 
     row = snap.last_row
     window = {f: float(row[f]) for f in FEATURE_ORDER if f in row.index}
-    true_label = int(row["Label"]) if "Label" in row.index else None
-    # The user clicked explicitly, so run the full chain even when the Monitor
-    # would not have escalated this window -- just say so in the header.
-    monitor_note = (
-        ""
-        if should_escalate(window)
-        else "Monitor Agent: nominal window (would **not** normally escalate) — ran anyway since you asked.  \n"
-    )
-
-    yield (
-        monitor_note
-        + "⏳ **Running full agent analysis** (Classifier → SPARTA Analyst → Mitigation → "
-        "Incident Reporter) on the latest row. This takes about 1–2 minutes on the Groq "
-        "free tier; rate-limit waits are retried automatically.",
-        "",
-    )
+    label_index = int(row["Label"]) if "Label" in row.index else -1
+    dataset_label = DEMO_CLASS_NAMES[label_index] if 0 <= label_index < len(DEMO_CLASS_NAMES) else "Unavailable"
+    monitor = ("Monitor: escalation criteria met." if should_escalate(window)
+               else "Monitor: did not escalate. Analysis requested manually.")
+    window_note = f"Replay window selected at submission · message ID {int(window['MsgId'])}."
+    yield f"**Live analysis running**\n\n{window_note} {monitor}", gr.skip(), gr.skip()
 
     try:
         result = run_pipeline_for_window(window)
-    except Exception as e:
-        print(f"[dashboard] agent pipeline failed: {e!r}")
-        yield "**Status:** ERROR — the agent pipeline failed. Check the server logs.", ""
-        return
-
-    classification = result["classification"]
-    header = monitor_note + (
-        f"**Status:** {result['status']}  |  "
-        f"**Detected:** {classification.predicted_class if classification else 'ERROR'}  |  "
-        f"**Confidence:** {classification.confidence if classification else 'N/A'}  |  "
-        f"**True label in data:** {true_label}"
-    )
-    yield header, result["report"]
+        classification = result["classification"]
+        if result["status"] == "ERROR" or classification is None:
+            diagnostic = str(result.get("report", "")).lower()
+            limited = any(term in diagnostic for term in ("rate limit", "rate_limit", "429"))
+            reason = ("The analysis provider is temporarily rate-limited. Wait and try again."
+                      if limited else "The analysis returned incomplete or invalid output. Try again or explore a cached scenario.")
+            yield f"**Analysis failed.** {reason} Your previous result is still available.\n\n{monitor}", gr.skip(), gr.skip()
+            return
+        prediction, confidence = classification.predicted_class, classification.confidence
+        policy = decide_mitigation(prediction, confidence)
+        policy_text = (f"`{policy['action']}` · policy lookup for the returned score. {policy['guardrail_note']}"
+                       if "action" in policy else "Policy details unavailable.")
+        if result["status"] == "FLAGGED_FOR_REVIEW":
+            policy_text += " The run was flagged for review."
+        summary = result_summary("Live analysis · Replay window", dataset_label, prediction, confidence, result["status"])
+        details = (
+            f"### Stage outputs\n\n"
+            f"1. **Monitor:** {monitor.removeprefix('Monitor: ')}\n"
+            f"2. **Classifier:** {prediction} · score {confidence}\n"
+            f"3. **SPARTA Analyst:** {'Context returned' if result.get('sparta_context') else 'Unavailable'}\n"
+            f"4. **Mitigation:** {policy_text}\n"
+            f"5. **Incident Reporter:** {'Narrative returned' if result.get('report') else 'Unavailable'}\n\n"
+            f"### SPARTA context · AI-generated\n{result.get('sparta_context') or 'Unavailable'}\n\n"
+            f"### Policy explanation · AI-generated\n{result.get('mitigation') or 'Unavailable'}\n\n"
+            f"### Incident narrative · AI-generated\n{result.get('report') or 'Unavailable'}\n\n"
+            "Policy outputs describe simulated actions. Per-window feature attribution is unavailable."
+        )
+        yield "Analysis complete. Review the result below.", f"{summary}\n\n{window_note} {monitor}", details
+    except Exception as exc:
+        print(f"[dashboard] agent pipeline failed: {exc!r}")
+        yield "This analysis couldn’t finish. Your previous result is still available. Try again or explore a cached scenario.", gr.skip(), gr.skip()
 
 
 def do_show_demo_example(class_name: str):
-    """Rate-limit-safe demo mode: reads a pre-computed example from
-    demo_cache.json instead of calling Groq live. Lets a reviewer click
-    through all 5 scenarios with zero API cost and zero rate-limit risk --
-    no Groq key needed at all for this path."""
-    if not DEMO_CACHE_PATH.exists():
-        return "No demo cache found yet -- run `python src/pipeline/generate_demo_cache.py` first.", ""
-
-    cache = json.loads(DEMO_CACHE_PATH.read_text(encoding="utf-8"))
-    if class_name not in cache:
-        return f"'{class_name}' not cached yet (cache generation may still be running).", ""
-
-    entry = cache[class_name]
-    c = entry["classification"]
-    header = (
-        f"**[CACHED EXAMPLE]** **Status:** {entry['status']}  |  "
-        f"**Detected:** {c['predicted_class'] if c else 'ERROR'}  |  "
-        f"**Confidence:** {c['confidence'] if c else 'N/A'}  |  "
-        f"**True label:** {entry['true_label']} ({class_name})"
-    )
-    return header, entry["report"]
+    """Read an existing example without invoking the analysis provider."""
+    try:
+        entry = json.loads(DEMO_CACHE_PATH.read_text(encoding="utf-8"))[class_name]
+        classification = entry.get("classification") or {}
+        summary = result_summary("Cached demo · Precomputed", class_name, classification.get("predicted_class"),
+                                 classification.get("confidence"), entry["status"])
+        return (
+            summary + "\n\nMonitor decisions and structured policy details are unavailable for this cached example.",
+            f"### SPARTA context · AI-generated\n{entry.get('sparta_context') or 'Unavailable'}\n\n"
+            f"### Policy explanation · AI-generated\n{entry.get('mitigation') or 'Unavailable'}\n\n"
+            f"### Incident narrative · AI-generated\n{entry.get('report') or 'Unavailable'}\n\n"
+            "Policy outputs describe simulated actions. Per-window feature attribution is unavailable.",
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return "This cached scenario couldn’t load. Try again or select another example.", gr.skip()
 
 
 def poll(metric_a, metric_b):
@@ -263,9 +272,9 @@ def poll(metric_a, metric_b):
     if snap.last_row is not None:
         window = {f: float(snap.last_row[f]) for f in FEATURE_ORDER if f in snap.last_row.index}
         escalate_md = (
-            "🚨 **Monitor: would escalate to Classifier Agent**"
+            "**Monitor: escalation criteria met**"
             if should_escalate(window)
-            else "✅ Monitor: nominal, would not escalate"
+            else "**Monitor: did not escalate**"
         )
     else:
         escalate_md = "Monitor: waiting for data..."
@@ -273,70 +282,103 @@ def poll(metric_a, metric_b):
     return status_md, table, plot_a, plot_b, label_df, escalate_md
 
 
-with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
-    gr.Markdown(
-        "# 🛰️ Telemetry Replay Simulator — Live Stream\n"
-        "Replays rows from the satellite bus telemetry CSV as a live stream at a "
-        "configurable speed. This view is a pure passthrough — no anomaly detection "
-        "or agent logic is applied here yet."
-    )
+DASHBOARD_THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="gray").set(
+    body_background_fill="#F7F9F7",
+    body_text_color="#19332F",
+    button_primary_background_fill="#237A70",
+    button_primary_text_color="#FFFFFF",
+)
+THEME_IN_BLOCKS = "theme" in signature(gr.Blocks).parameters
 
-    with gr.Accordion("Dataset", open=False, visible=not ON_HF_SPACE):
+with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
+               **({"theme": DASHBOARD_THEME} if THEME_IN_BLOCKS else {})) as demo:
+    gr.Markdown("# SentinelSat\nCubeSat telemetry security")
+    with gr.Tab("Overview"):
+        gr.Markdown(
+            "## Understand what’s happening in your telemetry.\n"
+            "Explore simulated CubeSat telemetry, potential attack classifications, "
+            "and confidence-aware policy decisions.\n\n"
+            "### Start with a sample scenario\n"
+            "**Cached demo** · Precomputed examples. No API key needed."
+        )
         with gr.Row():
-            dataset = gr.Dropdown(list(DATASETS), value=DEFAULT_DATASET, label="Telemetry dataset", scale=3)
-            load_btn = gr.Button("Load", scale=1)
-    load_status = gr.Markdown(
-        f"Loaded **{DEFAULT_DATASET}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
-    )
+            demo_buttons = []
+            for name in DEMO_CLASS_NAMES:
+                with gr.Column(min_width=150):
+                    gr.Markdown(f"**{name}**")
+                    demo_buttons.append(gr.Button(f"Explore sample: {name}"))
+        demo_header = gr.Markdown("")
+        with gr.Accordion("Read the stage outputs", open=False):
+            demo_report = gr.Markdown("")
+    with gr.Tab("Telemetry"):
+        gr.Markdown("## Telemetry replay\nRows are replayed from a simulated telemetry dataset.")
+        with gr.Accordion("Dataset", open=False, visible=not ON_HF_SPACE):
+            with gr.Row():
+                dataset = gr.Dropdown(list(DATASETS), value=DEFAULT_DATASET, label="Telemetry dataset", scale=3)
+                load_btn = gr.Button("Load", scale=1)
+        load_status = gr.Markdown(
+            f"Loaded **{DEFAULT_DATASET}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
+        )
 
-    with gr.Row():
-        speed = gr.Slider(1, 200, value=10, step=1, label="Speed (rows / sec)")
-        order_mode = gr.Radio(["Sequential", "Shuffled"], value="Sequential", label="Playback order")
-        loop = gr.Checkbox(value=True, label="Loop when finished")
-        buffer_size = gr.Slider(20, 500, value=100, step=10, label="Live buffer size (rows)")
+        with gr.Row():
+            speed = gr.Slider(1, 200, value=10, step=1, label="Speed (rows / sec)")
+            order_mode = gr.Radio(["Sequential", "Shuffled"], value="Sequential", label="Playback order")
+            loop = gr.Checkbox(value=True, label="Loop when finished")
+            buffer_size = gr.Slider(20, 500, value=100, step=10, label="Replay buffer size (rows)")
 
-    with gr.Row():
-        start_btn = gr.Button("▶ Start", variant="primary")
-        pause_btn = gr.Button("⏸ Pause")
-        resume_btn = gr.Button("⏵ Resume")
-        stop_btn = gr.Button("⏹ Stop / Reset")
+        with gr.Row():
+            start_btn = gr.Button("▶ Start", variant="primary")
+            pause_btn = gr.Button("⏸ Pause")
+            resume_btn = gr.Button("⏵ Resume")
+            stop_btn = gr.Button("⏹ Stop / Reset")
 
-    status = gr.Markdown("**State:** STOPPED")
+        status = gr.Markdown("**State:** STOPPED")
 
-    gr.Markdown("### Live message stream (most recent first)")
-    live_table = gr.Dataframe(headers=list(sim.df.columns), row_count=(20, "fixed"), wrap=True)
+        gr.Markdown("### Recent replayed telemetry rows (most recent first)")
+        live_table = gr.Dataframe(headers=list(sim.df.columns), row_count=(20, "fixed"), wrap=True)
 
-    gr.Markdown("### Rolling metrics")
-    with gr.Row():
-        metric_a = gr.Dropdown(METRIC_CHOICES, value="MessageRateInWindow", label="Chart 1 metric")
-        metric_b = gr.Dropdown(METRIC_CHOICES, value="MemoryAnonMB", label="Chart 2 metric")
-    with gr.Row():
-        plot_a = gr.LinePlot(label="Chart 1")
-        plot_b = gr.LinePlot(label="Chart 2")
+        gr.Markdown("### Rolling metrics")
+        with gr.Row():
+            metric_a = gr.Dropdown(METRIC_CHOICES, value="MessageRateInWindow", label="Chart 1 metric")
+            metric_b = gr.Dropdown(METRIC_CHOICES, value="MemoryAnonMB", label="Chart 2 metric")
+        with gr.Row():
+            plot_a = gr.LinePlot(label="Chart 1")
+            plot_b = gr.LinePlot(label="Chart 2")
 
-    gr.Markdown("### Ground-truth label mix in current buffer (descriptive only, not a detection)")
-    # y_lim starts the axis at 0: Vega otherwise zooms to [min, max] count,
-    # hiding the smallest bar entirely and exaggerating the differences.
-    label_bar = gr.BarPlot(x="Label", y="Count", label=" ", y_lim=[0, None]) if hasattr(gr, "BarPlot") else gr.Dataframe()
+        gr.Markdown("### Ground-truth label mix in current buffer (descriptive only, not a detection)")
+        # y_lim starts the axis at 0: Vega otherwise zooms to [min, max] count,
+        # hiding the smallest bar entirely and exaggerating the differences.
+        label_bar = gr.BarPlot(x="Label", y="Count", label=" ", y_lim=[0, None]) if hasattr(gr, "BarPlot") else gr.Dataframe()
 
-    gr.Markdown(
-        "### 🤖 Agent Pipeline\n"
-        "The escalation check below runs automatically on every row (free, no LLM). "
-        "The full 5-agent analysis (Monitor → Classifier → SPARTA Analyst → Mitigation → "
-        "Incident Reporter) is **click-to-run only** — it costs 4 Groq calls per click, "
-        "so it never fires automatically."
-    )
-    escalation_indicator = gr.Markdown("Monitor: waiting for data...")
-    analyze_btn = gr.Button("🔍 Run Full Agent Analysis on Latest Row", variant="primary")
-    analysis_header = gr.Markdown("")
-    analysis_report = gr.Markdown("")
-
-    gr.Markdown(
-        "#### 🎬 Demo Mode (no Groq key needed)\n"
-        "Pre-computed example for each class — instant, zero API cost, zero rate-limit risk."
-    )
-    with gr.Row():
-        demo_buttons = [gr.Button(name) for name in DEMO_CLASS_NAMES]
+    with gr.Tab("Analyze"):
+        gr.Markdown(
+            "## Analyze a telemetry window\n"
+            "Live analysis uses the latest replay row at the time you submit. "
+            "The Monitor screens the row automatically. The remaining four stages run only on request."
+        )
+        gr.Markdown(
+            "1. Monitor\n2. Classifier\n3. SPARTA Analyst\n4. Mitigation\n5. Incident Reporter"
+        )
+        escalation_indicator = gr.Markdown("Monitor: waiting for replay data.")
+        analyze_btn = gr.Button("Run full agent analysis", variant="primary",
+                                interactive=bool(os.environ.get("GROQ_API_KEY")))
+        if not os.environ.get("GROQ_API_KEY"):
+            gr.Markdown("Live analysis is unavailable on this server. Cached examples are available in Overview.")
+        analysis_status = gr.Markdown("")
+        analysis_header = gr.Markdown("")
+        analysis_report = gr.Markdown("")
+    with gr.Tab("How it works"):
+        gr.Markdown(
+            "## Reported model evaluation\n"
+            "**68.9% domain-shift accuracy · 0.697 macro F1.** The project report describes training "
+            "on clean simulated telemetry and evaluating on noised telemetry. Near-perfect clean "
+            "in-domain performance is a simulator ceiling and an unsuitable generalization estimate.\n\n"
+            "### Why review matters\n"
+            "The reported experiment counted 1,786 Normal windows predicted as Data Injection. "
+            "An adversarial Command Flooding and Data Injection blend produced a 0.999-confidence prediction. "
+            "SPARTA mapping provides context for review and does not establish attribution. "
+            "Per-window feature attribution is unavailable."
+        )
 
     # --- wiring ---
     load_btn.click(do_load_csv, inputs=[dataset], outputs=[load_status])
@@ -349,9 +391,9 @@ with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
     order_mode.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
     loop.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
 
-    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_header, analysis_report])
+    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_status, analysis_header, analysis_report])
     for btn, name in zip(demo_buttons, DEMO_CLASS_NAMES):
-        btn.click(lambda n=name: do_show_demo_example(n), inputs=[], outputs=[analysis_header, analysis_report])
+        btn.click(lambda n=name: do_show_demo_example(n), inputs=[], outputs=[demo_header, demo_report])
 
     timer = gr.Timer(0.5)
     timer.tick(
@@ -361,4 +403,4 @@ with gr.Blocks(title="Telemetry Replay Simulator — Live Stream") as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue().launch()
+    demo.queue().launch(**({} if THEME_IN_BLOCKS else {"theme": DASHBOARD_THEME}))
