@@ -124,9 +124,6 @@ function setupOverview() {
     showWorkspace(routeView(), { fromHistory: true });
     $("workspace-title").focus({ preventScroll: true });
   });
-  $("try-sample").addEventListener("click", () => {
-    $("scenario-cards").querySelector("button").focus();
-  });
   const cards = $("scenario-cards");
   cards.innerHTML = Object.entries(scenarios).map(([name, description]) => `
     <article class="scenario">
@@ -135,9 +132,7 @@ function setupOverview() {
     </article>`).join("");
   let cache;
   let selection = 0;
-  cards.addEventListener("click", async (event) => {
-    const name = event.target.dataset.scenario;
-    if (!name) return;
+  async function openSample(name, trigger) {
     const request = ++selection;
     $("scenario-status").textContent = "Loading cached scenario…";
     try {
@@ -152,13 +147,18 @@ function setupOverview() {
         button.setAttribute("aria-pressed", String(button.dataset.scenario === name));
       });
       renderScenario(name, example);
-      if (document.activeElement === event.target) $("scenario-result").focus();
+      if (currentWorkspace === "overview" && document.activeElement === trigger) $("scenario-result").focus();
       $("scenario-status").textContent = "";
     } catch (_) {
       if (request !== selection) return;
       $("scenario-status").textContent = "This cached scenario couldn’t load. Try again or open the hosted demo.";
     }
+  }
+  cards.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-scenario]");
+    if (trigger) openSample(trigger.dataset.scenario, trigger);
   });
+  $("try-sample").addEventListener("click", (event) => openSample("Data Injection", event.currentTarget));
 }
 
 function fact(label, value) {
