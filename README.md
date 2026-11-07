@@ -224,3 +224,8 @@ noised dataset the model is ~69% accurate and many noisy attack rows stay below
 the confidence guard, so noisy bursts are caught only 17–48% of the time. The
 website lets you compare clean vs noisy attacks live. All thresholds can be
 changed with environment variables (see `src/streaming/config.py`).
+
+### 10. If Claude or any AI is used
+```
+Check Claude.MD and make sure that you don't co=author any of the commits
+```
