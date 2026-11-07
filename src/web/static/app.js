@@ -36,6 +36,10 @@ const cls = (name) => `<span class="cls"><i style="background:var(${classColorTo
 
 let drawerSelection = null;
 const workspaces = { overview: "Overview", live: "Telemetry", incidents: "Incidents", lab: "Threat Lab", method: "How it works" };
+const workspaceRoutes = { overview: "overview", live: "telemetry", incidents: "incidents", lab: "threat-lab", method: "how-it-works" };
+let currentWorkspace;
+const workspaceScroll = new Map();
+let feedSnapshot = [];
 const incidentFilters = ["incident-search", "incident-class", "incident-state", "incident-report"];
 
 // ------------------------------------------------------------------------- //
@@ -98,7 +102,10 @@ function setupOverview() {
     drawChart();
   });
   Object.keys(workspaces).forEach((view) => {
-    $("show-" + view).addEventListener("click", () => showWorkspace(view));
+    $("show-" + view).addEventListener("click", () => {
+      showWorkspace(view);
+      $("workspace-title").focus({ preventScroll: true });
+    });
   });
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -106,11 +113,21 @@ function setupOverview() {
       $("workspace-title").focus();
     });
   });
+  const routeView = () => Object.keys(workspaceRoutes).find((view) => "#" + workspaceRoutes[view] === location.hash) || "overview";
+  history.scrollRestoration = "manual";
+  showWorkspace(routeView(), { fromHistory: true });
+  window.addEventListener("popstate", () => {
+    showWorkspace(routeView(), { fromHistory: true });
+    $("workspace-title").focus({ preventScroll: true });
+  });
+  $("try-sample").addEventListener("click", () => {
+    $("scenario-cards").querySelector("button").focus();
+  });
   const cards = $("scenario-cards");
   cards.innerHTML = Object.entries(scenarios).map(([name, description]) => `
     <article class="scenario">
       <h3>${name}</h3><p>${description}</p>
-      <button type="button" class="btn" aria-label="Explore sample: ${name}" data-scenario="${name}">Explore sample</button>
+      <button type="button" class="btn" aria-label="Explore sample: ${name}" aria-pressed="false" data-scenario="${name}">Explore sample</button>
     </article>`).join("");
   let cache;
   let selection = 0;
@@ -127,7 +144,11 @@ function setupOverview() {
       const example = (await cache)[name];
       if (!example) throw new Error("Scenario unavailable");
       if (request !== selection) return;
+      cards.querySelectorAll("[data-scenario]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.scenario === name));
+      });
       renderScenario(name, example);
+      if (document.activeElement === event.target) $("scenario-result").focus();
       $("scenario-status").textContent = "";
     } catch (_) {
       if (request !== selection) return;
@@ -136,25 +157,44 @@ function setupOverview() {
   });
 }
 
+function fact(label, value) {
+  return `<div><dt>${label}</dt><dd>${esc(value ?? "Unavailable")}</dd></div>`;
+}
+
+function resultSections({ prediction, evidence, policy, narrative }) {
+  return `<div class="result-sections">
+    <section><h4>Prediction and review</h4>${prediction}</section>
+    <section><h4>Evidence</h4>${evidence}</section>
+    <section><h4>Policy outcome</h4>${policy}</section>
+    <section><h4>AI narrative</h4>${narrative}</section>
+  </div>`;
+}
+
+function outputDetails(label, content) {
+  if (!content) return "";
+  return `<details><summary>${label}</summary><div class="md">${md(content)}</div></details>`;
+}
+
 function renderScenario(name, example) {
   const classification = example.classification;
   const result = $("scenario-result");
   result.innerHTML = `
-    <div class="card-head"><h3>${esc(name)} walkthrough</h3><span class="badge">Precomputed</span></div>
-    <div class="kv">
-      <div><small>Ground truth (dataset)</small><b>${esc(name)}</b></div>
-      <div><small>Predicted class</small><b>${esc(classification?.predicted_class || "Unavailable")}</b></div>
-      <div><small>Model confidence</small><b>${esc(classification?.confidence ?? "Unavailable")}</b></div>
-      <div><small>Review signal</small><b>${reviewSignal(example.status)}</b></div>
-    </div>
-    <p>${confidenceNote}</p>
-    ${classification?.predicted_class === "Normal" ? "<p>No attack class was predicted. Review the evidence before concluding the window is safe.</p>" : ""}
-    <p class="hint">The cache records outputs, but does not capture Monitor decisions, stage timing or structured policy details.</p>
-    <details><summary>SPARTA context · AI-generated</summary><div class="md">${md(example.sparta_context)}</div></details>
-    <details><summary>Policy explanation · AI-generated</summary><p class="hint">Structured policy details unavailable. The example describes simulated actions.</p><div class="md">${md(example.mitigation)}</div></details>
-    <details><summary>Incident narrative · AI-generated</summary><div class="md">${md(example.report)}</div></details>`;
+    <div class="card-head"><h3>${esc(name)} walkthrough</h3><span class="badge">Cached example</span></div>
+    ${resultSections({
+      prediction: `<dl class="result-facts">
+        ${fact("Predicted class", classification?.predicted_class)}
+        ${fact("Model confidence", classification?.confidence)}
+        ${fact("Review signal", reviewSignal(example.status))}
+      </dl><p class="hint">${confidenceNote}</p>
+      ${classification?.predicted_class === "Normal" ? '<p class="hint">No attack class was predicted. This is not a guarantee of safety.</p>' : ""}`,
+      evidence: `<dl class="result-facts">${fact("Ground truth (dataset)", name)}</dl>
+        <p class="hint">Raw telemetry and the Monitor decision are unavailable for this cached example.</p>`,
+      policy: `<p class="hint">Structured policy details are unavailable. The cached explanation describes simulated actions.</p>
+        ${outputDetails("Policy explanation · AI-generated", example.mitigation)}`,
+      narrative: outputDetails("Incident narrative", example.report) + outputDetails("SPARTA threat context", example.sparta_context)
+        || '<p class="hint">Narrative unavailable.</p>',
+    })}`;
   result.hidden = false;
-  if (!$("overview-view").hidden) result.focus();
 }
 
 function reviewSignal(status) {
@@ -216,6 +256,24 @@ function setupStatic() {
       e.target.classList.remove("invalid");
     }
   });
+  $("show-entry-editor").addEventListener("click", () => {
+    const editor = $("card-test");
+    editor.hidden = !editor.hidden;
+    $("show-entry-editor").setAttribute("aria-expanded", String(!editor.hidden));
+    $("show-entry-editor").textContent = editor.hidden ? "Open entry editor" : "Hide entry editor";
+    if (!editor.hidden) $("entry-heading").focus();
+  });
+  $("tracker-incident").addEventListener("click", () => openDrawer($("tracker-incident").dataset.open));
+  $("feed").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-row]");
+    if (button) {
+      const selected = feedSnapshot.findIndex((row) => String(row.entry_id) === button.dataset.row);
+      if (selected >= 0) showSnapshot({ rows: feedSnapshot, selected, triggerIds: new Set(), openerId: button.dataset.row });
+    }
+  });
+  $("feed").addEventListener("focusout", (event) => {
+    if (!$("feed").contains(event.relatedTarget)) queueMicrotask(renderFeed);
+  });
   $("t-load").addEventListener("click", loadSample);
   $("t-send").addEventListener("click", sendEntry);
   $("dr-close").addEventListener("click", () => closeDrawer());
@@ -225,31 +283,30 @@ function setupStatic() {
   $("evidence-row").addEventListener("input", selectEvidenceRow);
   $("back-live").addEventListener("click", returnToLive);
   $("back-incident").addEventListener("click", () => {
-    const { id, rows } = S.evidence;
-    returnToLive();
-    openDrawer(id, rows);
+    const { id, rows, incidentOpener } = S.evidence;
+    openDrawer(id, rows, incidentOpener);
   });
-
-  // Interactive timeline scrubbing / inspection on telemetry canvas
-  $("chart").addEventListener("pointermove", inspectChartPointer);
-  $("chart").addEventListener("pointerleave", () => $("chart-tip").classList.remove("visible"));
 
   window.addEventListener("resize", drawChart);
 }
 
-function showWorkspace(view) {
-  $("chart-tip").classList.remove("visible");
+function showWorkspace(view, { fromHistory = false } = {}) {
+  const changed = view !== currentWorkspace;
+  if (changed && currentWorkspace) workspaceScroll.set(currentWorkspace, window.scrollY);
+  currentWorkspace = view;
+  const hash = "#" + workspaceRoutes[view];
+  if (!fromHistory && location.hash !== hash) history.pushState(null, "", hash);
+
   Object.keys(workspaces).forEach((name) => {
     $(name + "-view").hidden = name !== view;
     $("show-" + name).setAttribute("aria-pressed", String(name === view));
   });
   $("workspace-title").textContent = workspaces[view];
-  $("workspace-mode").textContent = {
-    overview: "Cached demo", live: "Telemetry replay", incidents: "Replay and test incidents",
-    lab: "Simulated testing", method: "Project methodology",
-  }[view];
-  $("show-simulation").hidden = view !== "lab";
-  if (view === "live") drawChart();
+  if (changed) window.scrollTo(0, fromHistory ? workspaceScroll.get(view) || 0 : 0);
+  if (view === "live") {
+    renderFeed();
+    drawChart();
+  }
 }
 
 // ------------------------------------------------------------------------- //
@@ -274,7 +331,6 @@ function onBatch(b) {
     S.recent.push(...b.telemetry);
     if (S.recent.length > liveRowLimit) S.recent.splice(0, S.recent.length - liveRowLimit);
     b.telemetry.forEach(trackRow);
-    // Note: high-frequency flash("pc-rows") reflow removed to eliminate main-thread layout thrashing
     renderFeed();
     if (!S.evidence) chartDirty = true;
   }
@@ -305,7 +361,6 @@ function onIncidentEvent(e) {
   const merged = { ...cur, ...e };
   if (e.event === "opened") {
     merged.status = "open";
-    flash("pc-inc");
     const t = S.tracker;
     if (t && (e.trigger_entry_ids || []).some((id) => t.ids.has(id))) t.incidentId = e.incident_id;
   } else if (e.event === "closed") {
@@ -325,14 +380,8 @@ function onReportEvent(e) {
       report_finished_ts: e.finished_ts, report_predicted_class: e.predicted_class,
       report_confidence: e.confidence, report: e.report, sparta_context: e.sparta_context, mitigation: e.mitigation,
     });
-    flash("pc-rep");
   }
   S.incidents.set(e.incident_id, cur);
-}
-
-function flash(id) {
-  const el = $(id).parentElement;
-  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
 
 // ------------------------------------------------------------------------- //
@@ -354,14 +403,17 @@ function renderStats(s) {
 }
 
 function renderFeed() {
-  const rows = S.recent.slice(-14).reverse();
-  $("feed").innerHTML = rows.map((r) => {
-    const inj = r.source !== "replay";
-    return `<tr class="${inj ? "injected" : ""}"><td>${fmtTime(r.ts)}</td>
-      <td><span class="src ${inj ? "inj" : ""}" title="${esc(r.source)}">${inj ? "Injected" : "Replay"}</span></td>
-      <td>${r.true_class ? cls(r.true_class) : "–"}</td><td>${cls(r.predicted_class)}</td>
-      <td>${r.confidence.toFixed(2)}</td></tr>`;
-  }).join("");
+  const feed = $("feed");
+  if (currentWorkspace !== "live" || feed.contains(document.activeElement)) return;
+  feedSnapshot = S.recent.slice();
+  const rows = feedSnapshot.slice(-14).reverse();
+  feed.innerHTML = rows.map((row) => `<li><button type="button" class="telemetry-row" data-row="${esc(row.entry_id)}">
+    <span><small>Time</small><b>${fmtTime(row.ts)}</b><span class="sr-only"> · Row ${esc(row.entry_id)}</span></span>
+    <span><small>Source</small>${row.source === "replay" ? "Replay" : "Injected test"}</span>
+    <span><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
+    <span><small>Predicted</small>${cls(row.predicted_class)}</span>
+    <span><small>Confidence</small>${row.confidence.toFixed(3)}</span>
+  </button></li>`).join("") || '<li class="hint">Waiting for scored telemetry.</li>';
 }
 
 function chartLayout(width, height) {
@@ -373,27 +425,7 @@ function chartLayout(width, height) {
     rows,
     x: (i) => chartPad.l + step * (i + offset),
     y: (score) => chartPad.t + (height - chartPad.t - chartPad.b) * (1 - score),
-    index: (x) => Math.round((x - chartPad.l) / step) - offset,
   };
-}
-
-function inspectChartPointer(event) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const layout = chartLayout(rect.width, rect.height);
-  const pointerX = event.clientX - rect.left;
-  const index = layout.index(pointerX);
-  const row = layout.rows[index];
-  const tip = $("chart-tip");
-  if (!row || pointerX < chartPad.l || pointerX > rect.width - chartPad.r) {
-    tip.classList.remove("visible");
-    return;
-  }
-  const trigger = S.evidence?.triggerIds.has(row.entry_id) ? "<br>Incident trigger row" : "";
-  tip.innerHTML = `<b>${fmtTime(row.ts)}</b> · ${cls(row.predicted_class)}<br>threat: <b>${pct(row.threat)}</b> · conf: <b>${row.confidence.toFixed(3)}</b>${trigger}`;
-  const half = tip.offsetWidth / 2;
-  tip.style.left = Math.max(half, Math.min(rect.width - half, layout.x(index))) + "px";
-  tip.style.top = layout.y(row.threat) + "px";
-  tip.classList.add("visible");
 }
 
 function drawChart() {
@@ -411,7 +443,7 @@ function drawChart() {
   const muted = palette.getPropertyValue("--muted").trim();
   const colors = new Map([...CLASS_COLOR_TOKENS].map(([name, token]) => [name, palette.getPropertyValue(token).trim()]));
 
-  if (evidence) {
+  if (evidence?.first != null) {
     const start = Math.max(pad.l, x(evidence.first) - 5);
     const end = Math.min(W - pad.r, x(evidence.last) + 5);
     g.fillStyle = accent;
@@ -461,18 +493,25 @@ function drawChart() {
 
 function showEvidence(selection, triggerIds, matching) {
   const first = matching[0];
-  const last = matching.at(-1);
-  S.evidence = { id: selection.id, rows: selection.rows, triggerIds, first, last, selected: first };
   closeDrawer(false);
-  $("chart-heading").textContent = "Incident telemetry";
-  $("chart").setAttribute("aria-label", "Snapshot of telemetry with incident trigger rows marked");
-  $("chart-evidence").hidden = false;
-  $("evidence-summary").textContent = `${selection.id} · ${matching.length} of ${triggerIds.size} trigger rows captured`;
-  const range = $("evidence-row");
-  range.max = selection.rows.length;
-  range.value = first + 1;
-  selectEvidenceRow();
+  showSnapshot({ id: selection.id, rows: selection.rows, triggerIds, first,
+    last: matching.at(-1), selected: first, matchingCount: matching.length, incidentOpener: selection.opener });
+}
+
+function showSnapshot(snapshot) {
+  S.evidence = snapshot;
   showWorkspace("live");
+  $("chart-heading").textContent = snapshot.id ? "Incident telemetry" : "Telemetry snapshot";
+  $("chart").setAttribute("aria-label", "Frozen telemetry snapshot with the selected row highlighted");
+  $("chart-evidence").hidden = false;
+  $("back-incident").hidden = !snapshot.id;
+  $("evidence-summary").textContent = snapshot.id
+    ? `${snapshot.id} · ${snapshot.matchingCount} of ${snapshot.triggerIds.size} trigger rows captured`
+    : "Snapshot held while new telemetry continues to arrive.";
+  const range = $("evidence-row");
+  range.max = snapshot.rows.length;
+  range.value = snapshot.selected + 1;
+  selectEvidenceRow();
   range.focus();
 }
 
@@ -482,21 +521,27 @@ function selectEvidenceRow() {
   const range = $("evidence-row");
   evidence.selected = Number(range.value) - 1;
   const row = evidence.rows[evidence.selected];
-  const trigger = evidence.triggerIds.has(row.entry_id) ? " · Incident trigger row" : "";
-  const detail = `Row ${range.value} of ${evidence.rows.length} · ${fmtTime(row.ts, true)} · ${row.predicted_class} · Threat ${pct(row.threat)} · Confidence ${row.confidence.toFixed(3)}${trigger}`;
-  $("evidence-detail").textContent = detail;
-  range.setAttribute("aria-valuetext", detail);
+  const trigger = evidence.triggerIds.has(row.entry_id);
+  const source = row.source === "replay" ? "Replay" : "Injected test";
+  $("evidence-detail").innerHTML = [
+    fact("Row ID", row.entry_id), fact("Timestamp", fmtTime(row.ts, true)), fact("Source", source),
+    fact("Dataset label", row.true_class), fact("Predicted class", row.predicted_class),
+    fact("Threat score", pct(row.threat)), fact("Model confidence", row.confidence.toFixed(3)),
+    trigger ? fact("Incident evidence", "Trigger row") : "",
+  ].join("");
+  range.setAttribute("aria-valuetext", `Row ${range.value} of ${evidence.rows.length} · ${fmtTime(row.ts, true)} · ${row.predicted_class}`);
   drawChart();
 }
 
 function returnToLive() {
+  const openerId = S.evidence?.openerId;
   S.evidence = null;
   $("chart-evidence").hidden = true;
-  $("chart-tip").classList.remove("visible");
   $("chart-heading").textContent = "Telemetry replay";
   $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
   drawChart();
-  $("chart-heading").focus();
+  const row = openerId && $("feed").querySelector(`[data-row="${CSS.escape(openerId)}"]`);
+  (row || $("chart-heading")).focus();
 }
 
 // ------------------------------------------------------------------------- //
@@ -511,11 +556,13 @@ function reportState(i) {
 
 function agentBadge(i) {
   const state = reportState(i);
-  if (state === "ready" && i.report_mode === "cached") return '<span class="badge">Cached example</span>';
-  if (state === "ready" && i.report_status === "FLAGGED_FOR_REVIEW") return '<span class="badge run">Awaiting review</span>';
-  const labels = { queued: "AI queued", running: "AI analysing", error: "AI error", ready: "Report ready" };
+  if (state === "ready" && i.report_mode === "live" && i.report_status === "FLAGGED_FOR_REVIEW") {
+    return '<span class="badge run">Awaiting review</span>';
+  }
+  const label = reportProgress(i).replace(/\.$/, "");
   const styles = { running: "run", error: "err", ready: "done" };
-  return `<span class="badge ${styles[state] || ""}">${labels[state]}</span>`;
+  const style = state === "ready" && i.report_mode !== "live" ? "" : styles[state] || "";
+  return `<span class="badge ${style}">${label}</span>`;
 }
 
 function renderIncidents() {
@@ -575,11 +622,11 @@ function md(text) {
   return html;
 }
 
-async function openDrawer(id, evidenceRows) {
+async function openDrawer(id, evidenceRows, opener = document.activeElement) {
   const selection = {
     id,
     rows: evidenceRows ?? [...new Map(S.recent.map((row) => [row.entry_id, row])).values()],
-    opener: document.activeElement,
+    opener,
   };
   const cached = S.incidents.get(id) || {};
   drawerSelection = selection;
@@ -610,52 +657,61 @@ function renderDrawer() {
   const matching = rows.map((row, index) => triggerIds.has(row.entry_id) ? index : -1).filter((index) => index >= 0);
   const evidenceSummary = triggerIds.size ? `${matching.length} of ${triggerIds.size} trigger rows available in the replay buffer.`
     : "No trigger rows recorded for this incident.";
-  const evidenceFocused = document.activeElement?.id === "view-trigger-rows";
   const status = i.report_status;
+  const state = reportState(i);
   const cached = i.report_mode === "cached";
-  const provenance = cached ? "Cached example for this class" :
+  const complete = state === "ready";
+  const provenance = cached ? "Cached example from a different window" :
     i.report_mode === "live" ? "Live analysis of the incident sample window" : "Report source unavailable";
-  const reportBody = !status
-    ? `<p class="empty">Queued: the agent worker analyses one incident at a time.</p>`
-    : status === "RUNNING"
-      ? `<p class="empty">${cached ? "Loading a cached example…" : "Analysis in progress…"} Started ${fmtTime(i.report_started_ts, true)}.</p>`
-      : status === "ERROR"
-        ? `<p class="empty">The report could not finish. Review the captured telemetry evidence.</p>`
-      : `${md(i.report)}`;
-  $("dr-body").innerHTML = `
+  const body = $("dr-body");
+  const previousFocus = document.activeElement;
+  const summaries = [...body.querySelectorAll("summary")];
+  const focusedSummary = summaries.includes(previousFocus) ? previousFocus.textContent : null;
+  const openDetails = new Set(body.dataset.incidentId === id
+    ? summaries.filter((summary) => summary.parentElement.open).map((summary) => summary.textContent)
+    : []);
+  body.dataset.incidentId = id;
+  const review = i.report_mode === "live" && status === "FLAGGED_FOR_REVIEW";
+  const narrative = complete
+    ? outputDetails("Incident narrative", i.report) + outputDetails("SPARTA threat context", i.sparta_context)
+    : `<p class="hint">${reportProgress(i)}</p>`;
+
+  body.innerHTML = `
     <div class="dr-head">
-      <h3 id="dr-title">Predicted: ${cls(i.attack_class)} <span class="m">${esc(id)}</span></h3>
-      <span>${i.status === "open" ? `<span class="badge open">open</span>` : `<span class="badge">closed</span>`} ${agentBadge(i)}</span>
+      <h3 id="dr-title">Predicted: ${cls(i.attack_class)}</h3>
+      <p class="hint">${esc(id)} · ${i.status === "open" ? "Open" : "Closed"}</p>
     </div>
-    <p class="hint">${provenance}${cached ? " · Precomputed from a different window." : ""}</p>
-    ${!cached && status === "FLAGGED_FOR_REVIEW" ? '<p class="review-note">Awaiting review · Check the evidence before interpreting the policy outcome.</p>' : ""}
-    <div class="kv">
-      <div><small>Opened</small><b>${fmtTime(i.opened_ts, true)}</b></div>
-      ${i.closed_ts != null ? `<div><small>Closed</small><b>${fmtTime(i.closed_ts, true)}</b></div>` : ""}
-      <div><small>Rows</small><b>${i.row_count ?? "–"}</b></div>
-      <div><small>Peak confidence</small><b>${i.peak_confidence?.toFixed(4) ?? "Unavailable"}</b></div>
-      <div><small>Mean confidence</small><b>${i.mean_confidence?.toFixed(4) ?? "Unavailable"}</b></div>
-      <div><small>Duration</small><b>${i.duration_sec != null ? i.duration_sec + " s" : i.status === "open" ? "Ongoing" : "Unavailable"}</b></div>
-      <div><small>Ground truth (dataset)</small><b>${esc(i.sample_true_class || "unknown")}</b></div>
-      ${status && status !== "RUNNING" ? `
-      <div><small>Review signal</small><b>${cached ? "Unavailable for this incident" : reviewSignal(status)}</b></div>
-      <div><small>Agent classification</small><b>${esc(i.report_predicted_class || "–")} ${i.report_confidence != null ? "(" + i.report_confidence + ")" : ""}</b></div>
-      <div><small>Analysis time</small><b>${i.report_runtime_sec != null ? i.report_runtime_sec + " s" : "Unavailable"}</b></div>` : ""}
-    </div>
-    ${i.close_reason ? `<p class="hint">Closed: ${esc(i.close_reason)}</p>` : ""}
-    <div class="section"><h4>Telemetry evidence</h4>
-      <p class="hint">${evidenceSummary}</p>
-      ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
-    </div>
-    <p class="hint">${confidenceNote} Per-window feature attribution is unavailable in this build.</p>
-    ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Why review matters: Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}
-    <div class="section"><h4>Incident narrative · AI-generated</h4><div class="md">${reportBody}</div></div>
-    ${status && status !== "RUNNING" && status !== "ERROR" ? `
-    <div class="section"><h4>SPARTA threat context · AI-generated</h4><div class="md">${md(i.sparta_context)}</div></div>
-    <div class="section"><h4>Policy explanation · AI-generated</h4><p class="hint">Structured policy details unavailable. This describes a simulated policy outcome.</p><div class="md">${md(i.mitigation)}</div></div>` : ""}`;
+    ${resultSections({
+      prediction: `${review ? '<p class="review-note"><strong>Awaiting review</strong> · Check the evidence before interpreting the policy outcome.</p>' : agentBadge(i)}
+        <dl class="result-facts">${fact("Peak model confidence", i.peak_confidence?.toFixed(4))}
+        ${fact("Ground truth (incident sample)", i.sample_true_class)}
+        ${i.report_predicted_class && !cached ? fact("Analysis prediction", i.report_predicted_class) + fact("Analysis confidence", i.report_confidence) : ""}</dl>
+        <p class="hint">${confidenceNote}</p>`,
+      evidence: `<p>${evidenceSummary}</p>
+        ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
+        <p class="hint">Per-window feature attribution is unavailable.</p>
+        ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}`,
+      policy: `<p class="hint">Structured policy details are unavailable for this incident. Policy explanations describe simulated outcomes.</p>
+        ${complete ? outputDetails("Policy explanation · AI-generated", i.mitigation) : ""}`,
+      narrative: `<p class="hint">${provenance}</p>${narrative || '<p class="hint">Narrative unavailable.</p>'}`,
+    })}
+    <details class="incident-properties"><summary>Incident properties</summary>
+      <dl class="result-facts">
+        ${fact("Opened", fmtTime(i.opened_ts, true))}
+        ${i.closed_ts != null ? fact("Closed", fmtTime(i.closed_ts, true)) : ""}
+        ${fact("Rows", i.row_count)}${fact("Mean confidence", i.mean_confidence?.toFixed(4))}
+        ${fact("Duration", i.duration_sec != null ? i.duration_sec + " s" : i.status === "open" ? "Ongoing" : null)}
+        ${fact("Analysis time", i.report_runtime_sec != null ? i.report_runtime_sec + " s" : null)}
+        ${i.close_reason ? fact("Close reason", i.close_reason) : ""}
+      </dl>
+    </details>`;
+  body.querySelectorAll("summary").forEach((summary) => {
+    summary.parentElement.open = openDetails.has(summary.textContent);
+    if (summary.textContent === focusedSummary) summary.focus({ preventScroll: true });
+  });
   const button = $("view-trigger-rows");
   button?.addEventListener("click", () => showEvidence(selection, triggerIds, matching));
-  if (evidenceFocused) (button ?? $("dr-close")).focus({ preventScroll: true });
+  if (previousFocus.id === "view-trigger-rows") (button ?? $("dr-close")).focus({ preventScroll: true });
 }
 
 function closeDrawer(restoreFocus = true) {
@@ -665,7 +721,13 @@ function closeDrawer(restoreFocus = true) {
   $("drawer").hidden = true;
   $("incidents-view").classList.remove("has-detail");
   renderIncidents();
-  if (restoreFocus) restoreIncidentFocus(opener);
+  if (!restoreFocus) return;
+  if (opener.id === "tracker-incident") {
+    showWorkspace("lab");
+    (opener.hidden ? $("show-simulation") : opener).focus();
+  } else {
+    restoreIncidentFocus(opener);
+  }
 }
 
 function restoreIncidentFocus(opener) {
@@ -713,6 +775,9 @@ function startTracker(kind, ids, label, trueClass) {
 function showSending(label) {
   S.tracker = null;
   $("tr-title").textContent = label;
+  delete $("tracker").dataset.rendered;
+  $("tracker-incident").hidden = true;
+  $("tracker-announcement").textContent = "Sending telemetry.";
   $("tracker").innerHTML = step("run", "Sent to Kafka", "sending…") + step("wait", "Detected", "") +
     step("wait", "Incident", "") + step("wait", "AI report", "");
 }
@@ -724,6 +789,7 @@ function setRunPending(pending) {
 
 function showRunFailure(message) {
   $("tracker").firstElementChild.outerHTML = step("err", "Submission failed", "Check the connection and try again.");
+  $("tracker-announcement").textContent = "Submission failed.";
   toast(message, "error");
 }
 
@@ -746,6 +812,8 @@ async function sendEntry() {
     feats[inp.dataset.f] = v;
   });
   if (bad) {
+    $("feature-editor").open = true;
+    $("t-features").querySelector(".invalid").focus();
     toast("Every feature needs a number. Click “Load sample” to start from a real row.", "error");
     return;
   }
@@ -825,7 +893,7 @@ function renderTracker() {
   const inc = t.incidentId ? S.incidents.get(t.incidentId) : null;
   const last = [...t.order].reverse().map((id) => t.decisions.get(id)).find(Boolean);
   if (inc) {
-    items.push(step("done", "Incident", `<button class="linkish" data-open="${esc(inc.incident_id)}">${esc(inc.incident_id)}</button> ${cls(inc.attack_class)} · ${inc.status === "open" ? "open" : "closed"} · ${inc.row_count} rows`));
+    items.push(step("done", "Incident", `${cls(inc.attack_class)} · ${inc.status === "open" ? "open" : "closed"} · ${inc.row_count} rows`));
   } else if (last) {
     const finished = t.decisions.size >= n;
     const msg = finished
@@ -836,28 +904,37 @@ function renderTracker() {
     items.push(step(got ? "run" : "wait", "Incident", got ? "waiting for the incident manager…" : ""));
   }
 
-  // 4. AI report
-  if (!inc) {
-    const none = t.decisions.size >= n;
-    items.push(step(none ? "no" : "wait", "AI report", none ? "Only incidents get an AI report." : ""));
-  } else if (!inc.report_status) {
-    items.push(step("run", "AI report", "queued for the agent worker…"));
-  } else if (inc.report_status === "RUNNING") {
-    const secs = Math.round(Date.now() / 1000 - (inc.report_started_ts || Date.now() / 1000));
-    items.push(step("run", "AI report", `4 agents analysing… ${secs}s (usually 1–2 min on Groq's free tier)`));
-  } else if (inc.report_status === "ERROR") {
-    items.push(step("err", "AI report", `the agents failed. <button class="linkish" data-open="${esc(inc.incident_id)}">Details</button>`));
-  } else {
-    items.push(step("done", "AI report", `${esc(inc.report_status)} in ${inc.report_runtime_sec}s · <button class="linkish" data-open="${esc(inc.incident_id)}">View report</button>`));
-  }
+  // The action stays mounted as replay and report events update progress.
+  const state = inc ? reportState(inc) : "wait";
+  const reportStyle = { queued: "run", running: "run", ready: "done", error: "err", wait: "wait" };
+  const progress = inc ? reportProgress(inc) : t.decisions.size >= n ? "No incident report for this run." : "";
+  items.push(step(reportStyle[state], "AI report", progress));
+  const action = $("tracker-incident");
+  action.hidden = !inc;
+  if (inc) action.dataset.open = inc.incident_id;
 
-  const focused = document.activeElement;
-  $("tracker").innerHTML = items.join("");
-  $("tracker").querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDrawer(b.dataset.open)));
-  if (focused.matches("[data-open]")) restoreIncidentFocus(focused);
+  const markup = items.join("");
+  const list = $("tracker");
+  if (list.dataset.rendered !== markup) {
+    list.innerHTML = markup;
+    list.dataset.rendered = markup;
+  }
+  const announcement = progress || (inc ? "Incident available." : got >= n ? "Telemetry scored." : "Waiting for scored telemetry.");
+  const status = $("tracker-announcement");
+  if (status.textContent !== announcement) status.textContent = announcement;
 }
-// Keep the "analysing… Ns" timer ticking.
-setInterval(() => { const t = S.tracker; if (t && t.incidentId) renderTracker(); }, 1000);
+
+function reportProgress(incident) {
+  const state = reportState(incident);
+  if (state === "queued") return "Queued for a report.";
+  if (state === "error") return "Report unavailable. Review the telemetry evidence.";
+  if (incident.report_mode === "cached") {
+    return state === "running" ? "Loading a cached example." : "Cached example available.";
+  }
+  if (incident.report_mode !== "live") return "Report source unavailable.";
+  if (state === "running") return "Live analysis running.";
+  return incident.report_status === "FLAGGED_FOR_REVIEW" ? "Awaiting review." : "Report ready.";
+}
 
 setupOverview();
 boot().catch(() => {
