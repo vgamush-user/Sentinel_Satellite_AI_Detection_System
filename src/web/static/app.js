@@ -619,11 +619,13 @@ function md(text) {
   if (!text) return "<p class='empty'>–</p>";
   const lines = esc(text).split(/\r?\n/);
   let html = "", inList = false, table = [];
+  let tableCount = 0;
   const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/(^|[^*])\*([^*]+)\*/g, "$1<i>$2</i>");
   const flushTable = () => {
     if (!table.length) return;
-    html += "<table>" + table.filter((r) => !/^\|?\s*:?-{2,}/.test(r)).map((r) =>
-      "<tr>" + r.replace(/^\||\|$/g, "").split("|").map((c) => `<td>${inline(c.trim())}</td>`).join("") + "</tr>").join("") + "</table>";
+    html += `<div class="report-table" role="region" aria-label="Report table ${++tableCount}" tabindex="0"><table>`
+      + table.filter((r) => !/^\|?\s*:?-{2,}/.test(r)).map((r) =>
+        "<tr>" + r.replace(/^\||\|$/g, "").split("|").map((c) => `<td>${inline(c.trim())}</td>`).join("") + "</tr>").join("") + "</table></div>";
     table = [];
   };
   for (const raw of lines) {
@@ -687,6 +689,8 @@ function renderDrawer() {
     i.report_mode === "live" ? "Live analysis of the incident sample window" : "Report source unavailable";
   const body = $("dr-body");
   const previousFocus = document.activeElement;
+  const focusedTable = [...body.querySelectorAll(".report-table")].indexOf(previousFocus);
+  const tableScroll = focusedTable >= 0 ? previousFocus.scrollLeft : 0;
   const summaries = [...body.querySelectorAll("summary")];
   const focusedSummary = summaries.includes(previousFocus) ? previousFocus.textContent : null;
   const openDetails = new Set(body.dataset.incidentId === id
@@ -731,6 +735,11 @@ function renderDrawer() {
     summary.parentElement.open = openDetails.has(summary.textContent);
     if (summary.textContent === focusedSummary) summary.focus({ preventScroll: true });
   });
+  if (focusedTable >= 0) {
+    const table = body.querySelectorAll(".report-table")[focusedTable];
+    (table?.closest("details")?.open ? table : $("dr-close")).focus({ preventScroll: true });
+    if (table) table.scrollLeft = tableScroll;
+  }
   const button = $("view-trigger-rows");
   button?.addEventListener("click", () => showEvidence(selection, triggerIds, matching));
   if (previousFocus.id === "view-trigger-rows") (button ?? $("dr-close")).focus({ preventScroll: true });
