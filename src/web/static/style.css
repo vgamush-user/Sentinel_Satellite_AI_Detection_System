@@ -181,6 +181,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 .btn:hover { border-color: var(--accent); }
 .btn:active:not(:disabled) { transform: scale(0.97); }
+.workspace-nav .btn:active:not(:disabled) { transform: none; background: var(--panel-2); }
 .btn:disabled { opacity: .5; cursor: wait; }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: white; }
 .btn.primary:hover { background: var(--accent-hover); }
@@ -358,6 +359,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled), .close:active { transform: none; }
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

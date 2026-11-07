@@ -279,6 +279,7 @@ function setupStatic() {
   $("feed").addEventListener("focusout", (event) => {
     if (!$("feed").contains(event.relatedTarget)) queueMicrotask(renderFeed);
   });
+  $("feed").addEventListener("focusin", renderFeed);
   $("t-load").addEventListener("click", loadSample);
   for (const id of ["t-class", "t-quality"]) {
     $(id).addEventListener("change", () => {
@@ -426,16 +427,42 @@ function renderStats(s) {
 
 function renderFeed() {
   const feed = $("feed");
-  if (currentWorkspace !== "live" || feed.contains(document.activeElement)) return;
+  if (currentWorkspace !== "live") return;
+  const held = feed.contains(document.activeElement);
+  $("feed-held").hidden = !held;
+  if (held) return;
   feedSnapshot = S.recent.slice();
-  const rows = feedSnapshot.slice(-14).reverse();
-  feed.innerHTML = rows.map((row) => `<li><button type="button" class="telemetry-row" data-row="${esc(row.entry_id)}">
+  const rows = new Map();
+  for (const row of feedSnapshot.slice(-14).reverse()) {
+    const id = String(row.entry_id);
+    if (!rows.has(id)) rows.set(id, row);
+  }
+  if (!rows.size) {
+    if (feed.querySelector("[data-row]")) feed.innerHTML = '<li class="hint">Waiting for scored telemetry.</li>';
+    return;
+  }
+  const existing = new Map();
+  for (const item of [...feed.children]) {
+    const id = item.firstElementChild?.dataset.row;
+    if (rows.has(id)) existing.set(id, item);
+    else item.remove();
+  }
+  let next = feed.firstElementChild;
+  for (const [id, row] of rows) {
+    let item = existing.get(id);
+    if (!item) {
+      item = document.createElement("li");
+      item.innerHTML = `<button type="button" class="telemetry-row" data-row="${esc(id)}">
     <span><small>Time</small><b>${fmtTime(row.ts)}</b><span class="sr-only"> · Row ${esc(row.entry_id)}</span></span>
     <span><small>Source</small>${row.source === "replay" ? "Replay" : "Injected test"}</span>
     <span><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
     <span><small>Predicted</small>${cls(row.predicted_class)}</span>
     <span><small>Confidence</small>${row.confidence.toFixed(3)}</span>
-  </button></li>`).join("") || '<li class="hint">Waiting for scored telemetry.</li>';
+  </button>`;
+    }
+    if (item === next) next = next.nextElementSibling;
+    else feed.insertBefore(item, next);
+  }
 }
 
 function chartLayout(width, height) {
@@ -563,7 +590,7 @@ function returnToLive() {
   $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
   drawChart();
   const row = openerId && $("feed").querySelector(`[data-row="${CSS.escape(openerId)}"]`);
-  (row || $("chart-heading")).focus();
+  (row || $(openerId ? "feed-heading" : "chart-heading")).focus();
 }
 
 // ------------------------------------------------------------------------- //

@@ -106,6 +106,7 @@
   <section class="card" id="card-feed">
     <div class="card-head"><h2 id="feed-heading" tabindex="-1">Recent telemetry rows</h2></div>
     <p class="hint">Select a row to inspect a fixed snapshot while replay continues.</p>
+    <p class="hint" id="feed-held" role="status" hidden>Rows are held while you navigate the feed. Replay continues in the background.</p>
     <div class="telemetry-columns" aria-hidden="true"><span>Time</span><span>Source</span><span>Dataset label</span><span>Predicted</span><span>Confidence</span></div>
     <ul id="feed" class="telemetry-rows"><li class="hint">Waiting for scored telemetry.</li></ul>
   </section>
