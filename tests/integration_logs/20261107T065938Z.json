@@ -1,0 +1,50 @@
+{
+  "timestamp_utc": "20261107T065938Z",
+  "mode": "cached",
+  "data_contract_problems": [],
+  "scenario_results": {
+    "Normal": {
+      "status": "AUTONOMOUS",
+      "classification": {
+        "predicted_class": "Normal",
+        "confidence": 0.9982
+      }
+    },
+    "Storage Exhaustion": {
+      "status": "AUTONOMOUS",
+      "classification": {
+        "predicted_class": "Storage Exhaustion",
+        "confidence": 0.9996
+      }
+    },
+    "Command Flooding": {
+      "status": "AUTONOMOUS",
+      "classification": {
+        "predicted_class": "Command Flooding",
+        "confidence": 0.9996
+      }
+    },
+    "Data Injection": {
+      "status": "FLAGGED_FOR_REVIEW",
+      "classification": {
+        "predicted_class": "Data Injection",
+        "confidence": 0.6103
+      }
+    },
+    "Defence Impairment": {
+      "status": "FLAGGED_FOR_REVIEW",
+      "classification": {
+        "predicted_class": "Defence Impairment",
+        "confidence": 0.6746
+      }
+    }
+  },
+  "scenario_problems": {
+    "Normal": [],
+    "Storage Exhaustion": [],
+    "Command Flooding": [],
+    "Data Injection": [],
+    "Defence Impairment": []
+  },
+  "total_problems": 0
+}
