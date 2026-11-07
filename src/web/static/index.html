@@ -7,25 +7,66 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <div class="logo" aria-hidden="true">
+<aside class="sidebar">
+  <div class="brand"><div class="logo" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="30" height="30"><circle cx="16" cy="16" r="5" fill="currentColor"/><ellipse cx="16" cy="16" rx="14" ry="6" fill="none" stroke="currentColor" stroke-width="1.6" transform="rotate(-25 16 16)"/></svg>
-    </div>
-    <div>
-      <h1>Sentinel <span>Live Satellite Threat Monitor</span></h1>
-      <p class="sub">Telemetry streams through Apache Kafka &rarr; XGBoost scores every row &rarr; attacks become incidents &rarr; AI agents write the response</p>
-    </div>
-  </div>
+    </div><div><strong>SentinelSat</strong><small>Threat monitor</small></div></div>
+  <nav class="workspace-nav" aria-label="Dashboard views">
+    <button type="button" class="btn" id="show-live" aria-controls="live-view" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9h3l2-5 3 10 2-5h4"/></svg>Live Monitor</button>
+    <button type="button" class="btn" id="show-incidents" aria-controls="incidents-view" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h12M3 9h12M3 14h12"/><path d="M6 4h.01M6 9h.01M6 14h.01"/></svg>Incidents</button>
+    <button type="button" class="btn" id="show-lab" aria-controls="lab-view" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h4M8 2v5l-4 7a1 1 0 0 0 1 2h8a1 1 0 0 0 1-2l-4-7V2M6 11h6"/></svg>Threat Lab</button>
+  </nav>
+</aside>
+
+<div class="workspace">
+  <header class="top">
+    <h1 id="workspace-title">Live Monitor</h1>
+    <button class="btn primary" id="show-simulation" type="button" hidden>Run simulation</button>
+  </header>
+  <main>
+<section class="grid" id="live-view" aria-labelledby="show-live">
+  <section class="telemetry-status" aria-label="Live system status">
   <div class="pills">
     <span class="pill" id="pill-kafka"><i class="dot"></i>Kafka</span>
     <span class="pill"><b id="st-rate">0</b> rows/s</span>
-    <span class="pill">accuracy <b id="st-acc">&ndash;</b></span>
+    <span class="pill" title="All labeled rows seen since the dashboard server started, including injections">Observed accuracy <b id="st-acc">&ndash;</b><span class="sr-only"> across all labeled rows since the dashboard server started, including injections</span></span>
     <span class="pill">latency <b id="st-lat">&ndash;</b></span>
     <span class="pill">agents <b id="st-mode">&ndash;</b></span>
+    <span class="pill replay-pill">Replay dataset <b id="st-dataset">unknown</b></span>
   </div>
-</header>
+  </section>
+  <section class="card" id="card-chart">
+    <div class="card-head">
+      <h2 id="chart-heading" tabindex="-1">Live telemetry</h2>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="chart-wrap" id="chart-wrap">
+      <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+      <div class="chart-tooltip" id="chart-tip" role="tooltip" aria-hidden="true"></div>
+    </div>
+    <div id="chart-evidence" class="evidence-controls" hidden>
+      <div class="evidence-heading">
+        <p id="evidence-summary"></p>
+        <div class="evidence-actions"><button type="button" class="btn ghost" id="back-incident">Back to incident</button> <button type="button" class="btn" id="back-live">Back to live</button></div>
+      </div>
+      <label for="evidence-row">Inspect snapshot row</label>
+      <input id="evidence-row" type="range" min="1" max="1" value="1" step="1">
+      <p id="evidence-detail" class="hint"></p>
+    </div>
+    <p class="hint">Each dot is one telemetry row: its threat score (1 &minus; P(Normal)), coloured by the class XGBoost predicted. Large dots are attack evidence (confidence &ge; <span class="g-conf">0.7</span>). Dots with a ring were injected.</p>
+  </section>
 
+  <section class="card" id="card-feed">
+    <div class="card-head"><h2 id="feed-heading" tabindex="-1">Live feed</h2></div>
+    <div class="feed-scroll" role="region" aria-labelledby="feed-heading" tabindex="0">
+      <table class="feed">
+        <thead><tr><th>Time</th><th>Source</th><th>True</th><th>Detected</th><th>Confidence</th></tr></thead>
+        <tbody id="feed"></tbody>
+      </table>
+    </div>
+  </section>
+  <details class="pipeline-details">
+    <summary>Pipeline health</summary>
 <section class="pipeline" aria-label="Pipeline">
   <div class="stage svc"><span>Producer</span><small>CSV replay + inject</small></div>
   <div class="arrow"></div>
@@ -33,47 +74,44 @@
   <div class="arrow"></div>
   <div class="stage svc"><span>Detector</span><small>XGBoost per row</small></div>
   <div class="arrow"></div>
-  <div class="stage topic"><span>telemetry.scored</span><b id="pc-rows">0</b></div>
+  <button type="button" class="stage topic" data-target="feed-heading" aria-controls="card-feed" aria-label="Go to live feed"><span>telemetry.scored</span><b id="pc-rows">0</b></button>
   <div class="arrow"></div>
   <div class="stage svc"><span>Incident manager</span><small id="pc-guard">guards</small></div>
   <div class="arrow"></div>
-  <div class="stage topic"><span>incidents</span><b id="pc-inc">0</b></div>
+  <button type="button" class="stage topic" data-target="incidents-heading" aria-controls="card-incidents" aria-label="Go to incidents"><span>incidents</span><b id="pc-inc">0</b></button>
   <div class="arrow"></div>
   <div class="stage svc"><span>4 AI agents</span><small>Groq, per incident</small></div>
   <div class="arrow"></div>
   <div class="stage topic"><span>reports</span><b id="pc-rep">0</b></div>
 </section>
+    <p class="pipeline-link"><a href="http://localhost:8081" target="_blank" rel="noopener">Open Kafka UI</a></p>
+  </details>
+</section>
 
-<main class="grid">
-  <section class="card span2" id="card-chart">
-    <div class="card-head">
-      <h2>Live telemetry</h2>
-      <div class="legend" id="legend"></div>
+<section id="incidents-view" aria-labelledby="show-incidents" hidden>
+  <section id="card-incidents" aria-labelledby="incidents-heading">
+    <div class="incident-toolbar">
+      <h2 id="incidents-heading" class="sr-only" tabindex="-1">Incident queue</h2>
+      <label>Find incident <input id="incident-search" type="search" placeholder="ID or attack class"></label>
+      <label>Attack class <select id="incident-class"><option value="">All classes</option></select></label>
+      <label>Incident state <select id="incident-state"><option value="">Any state</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+      <label>Report state <select id="incident-report"><option value="">Any state</option><option value="queued">Queued</option><option value="running">Analysing</option><option value="ready">Ready</option><option value="error">Error</option></select></label>
+      <button class="btn ghost" id="clear-filters" type="button" hidden>Clear filters</button>
     </div>
-    <div class="chart-wrap" id="chart-wrap">
-      <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
-      <div class="chart-tooltip" id="chart-tip" role="tooltip" aria-hidden="true"></div>
-    </div>
-    <p class="hint">Each dot is one telemetry row: its threat score (1 &minus; P(Normal)), coloured by the class XGBoost predicted. Large dots are attack evidence (confidence &ge; <span class="g-conf">0.7</span>). Dots with a ring were injected.</p>
+    <p class="queue-count" id="inc-count"></p>
+    <div class="incidents" id="incidents"><p class="queue-empty">Loading incidents…</p></div>
   </section>
+  <aside class="drawer" id="drawer" hidden>
+    <section class="drawer-panel" aria-labelledby="dr-title">
+      <button class="close" id="dr-close" type="button" aria-label="Close incident details">&times;</button>
+      <div id="dr-body"></div>
+    </section>
+  </aside>
+</section>
 
-  <section class="card" id="card-attack">
-    <div class="card-head"><h2>Launch an attack</h2></div>
-    <p class="hint">Sends a burst of real attack rows from the dataset into the live stream.</p>
-    <div class="attack-buttons" id="attack-buttons"></div>
-    <div class="row">
-      <label>Telemetry quality
-        <select id="atk-quality">
-          <option value="clean">Clean (model reliable)</option>
-          <option value="noisy">Noisy (realistic, harder)</option>
-        </select>
-      </label>
-      <label>Rows <input id="atk-count" type="number" min="5" max="100" value="15"></label>
-    </div>
-  </section>
-
-  <section class="card span2" id="card-test">
-    <div class="card-head"><h2>Test a new entry</h2></div>
+<section class="grid" id="lab-view" aria-labelledby="show-lab" hidden>
+  <section class="card" id="card-test">
+    <div class="card-head"><h2>Test a telemetry entry</h2></div>
     <div class="row">
       <label>Start from
         <select id="t-class"></select>
@@ -91,45 +129,42 @@
     <div class="row send-row">
       <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
       <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst &times; <input id="t-burst" type="number" min="2" max="50" value="10"></label>
-      <button class="btn primary" id="t-send">Send &#9656;</button>
+      <button class="btn primary" id="t-send">Send entry</button>
     </div>
-    <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so only a burst gets an AI report.</p>
+    <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
   </section>
 
   <section class="card" id="card-tracker">
-    <div class="card-head"><h2>Tracking</h2><small id="tr-title">nothing sent yet</small></div>
+    <div class="card-head"><h2>Run progress</h2><small id="tr-title">No runs yet</small></div>
     <ol class="tracker" id="tracker">
-      <li class="wait"><b>Sent to Kafka</b><span>Send an entry or launch an attack</span></li>
+      <li class="wait"><b>Sent to Kafka</b><span>Send a telemetry entry or run a simulation</span></li>
       <li class="wait"><b>Detected</b><span></span></li>
       <li class="wait"><b>Incident</b><span></span></li>
       <li class="wait"><b>AI report</b><span></span></li>
     </ol>
   </section>
 
-  <section class="card span2" id="card-incidents">
-    <div class="card-head"><h2>Incidents</h2><small id="inc-count"></small></div>
-    <div class="incidents" id="incidents"><p class="empty">No incidents yet. Launch an attack to create one.</p></div>
-  </section>
-
-  <section class="card" id="card-feed">
-    <div class="card-head"><h2>Live feed</h2></div>
-    <table class="feed">
-      <thead><tr><th>Time</th><th>Source</th><th>True</th><th>Detected</th><th>Conf</th></tr></thead>
-      <tbody id="feed"></tbody>
-    </table>
-  </section>
+</section>
 </main>
+</div>
 
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="dr-title">
-    <button class="close" id="dr-close" aria-label="Close">&times;</button>
-    <div id="dr-body"></div>
-  </div>
-</aside>
-
+<dialog id="simulation" aria-labelledby="simulation-title">
+  <form id="simulation-form">
+    <div class="card-head"><h2 id="simulation-title">Run simulation</h2>
+      <button class="close" id="simulation-close" type="button" aria-label="Close simulation">&times;</button>
+    </div>
+    <p class="hint">Inject attack rows into the monitored telemetry stream.</p>
+    <label>Attack class <select id="atk-class" required></select></label>
+    <div class="row">
+      <label>Telemetry quality
+        <select id="atk-quality"><option value="clean">Clean</option><option value="noisy">Noisy</option></select>
+      </label>
+      <label>Rows <input id="atk-count" type="number" min="5" max="100" value="15" required></label>
+    </div>
+    <div class="dialog-actions"><button class="btn primary" id="atk-submit" type="submit">Run simulation</button></div>
+  </form>
+</dialog>
 <div id="toast-root" class="toast-container" aria-live="polite"></div>
-
-<footer class="foot">Sentinel Satellite AI Detection System &middot; Kafka UI: <a href="http://localhost:8080" target="_blank" rel="noopener">localhost:8080</a></footer>
 <script src="/static/app.js"></script>
 </body>
 </html>

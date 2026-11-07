@@ -2,27 +2,43 @@
 // Sentinel live monitor client: initial state from /api/state, then live
 // batches over the /ws WebSocket (telemetry rows, incident and report events).
 
-const COLORS = {
-  "Normal": "#5fbf8f",
-  "Storage Exhaustion": "#f5b84d",
-  "Command Flooding": "#ff6b6b",
-  "Data Injection": "#b48cff",
-  "Defence Impairment": "#4da3ff",
-};
+const palette = getComputedStyle(document.documentElement);
+const COLORS = new Map([
+  ["Normal", "--c-normal"],
+  ["Storage Exhaustion", "--c-se"],
+  ["Command Flooding", "--c-cf"],
+  ["Data Injection", "--c-di"],
+  ["Defence Impairment", "--c-dim"],
+].map(([name, token]) => [name, palette.getPropertyValue(token).trim()]));
+const colorFor = (name) => COLORS.get(name) || "#888";
+const accent = palette.getPropertyValue("--accent").trim();
+const thresholdColor = palette.getPropertyValue("--warn").trim();
+const chartPad = { l: 34, r: 10, t: 10, b: 20 };
+const liveRowLimit = 300;
 const S = {
   config: null,
   recent: [],              // last 300 slim telemetry rows
   incidents: new Map(),    // incident_id -> merged incident + report fields
   tracker: null,           // the latest thing sent from this page
   decisions: new Map(),    // entry_id -> latest entry_decision (recent injected entries)
+  evidence: null,          // the snapshot currently displayed on the chart
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString([], { hour12: false }) : "–";
+function fmtTime(ts, includeDate = false) {
+  if (!Number.isFinite(ts)) return "–";
+  const date = new Date(ts * 1000);
+  if (!Number.isFinite(date.getTime())) return "–";
+  const iso = date.toISOString();
+  const time = iso.slice(11, 19) + " UTC";
+  return includeDate ? iso.slice(0, 10) + " " + time : time;
+}
 const pct = (v) => v == null ? "–" : (v * 100).toFixed(1) + "%";
-const cls = (name) => `<span class="cls"><i style="background:${COLORS[name] || "#888"}"></i>${esc(name || "–")}</span>`;
+const cls = (name) => `<span class="cls"><i style="background:${colorFor(name)}"></i>${esc(name || "–")}</span>`;
 
-let lastFocusedElement = null;
+let drawerSelection = null;
+const workspaces = { live: "Live Monitor", incidents: "Incidents", lab: "Threat Lab" };
+const incidentFilters = ["incident-search", "incident-class", "incident-state", "incident-report"];
 
 // ------------------------------------------------------------------------- //
 // Non-blocking toast notifications (replaces blocking alert)
@@ -66,6 +82,15 @@ async function boot() {
 }
 
 function setupStatic() {
+  Object.keys(workspaces).forEach((view) => {
+    $("show-" + view).addEventListener("click", () => showWorkspace(view));
+  });
+  document.querySelectorAll(".pipeline button[data-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      showWorkspace(button.dataset.target === "incidents-heading" ? "incidents" : "live");
+      $(button.dataset.target).focus();
+    });
+  });
   const g = S.config.guards;
   document.querySelectorAll(".g-conf").forEach((e) => (e.textContent = g.min_confidence));
   document.querySelectorAll(".g-rows").forEach((e) => (e.textContent = g.min_rows));
@@ -73,16 +98,30 @@ function setupStatic() {
   $("pc-guard").textContent = `${g.min_rows} of ${g.window_rows} rows ≥ ${g.min_confidence}`;
   $("st-mode").textContent = S.config.agent_mode;
 
-  $("legend").innerHTML = S.config.classes.map((c) => `<span><i style="background:${COLORS[c]}"></i>${esc(c)}</span>`).join("");
+  $("legend").innerHTML = S.config.classes.map((c) => `<span><i style="background:${colorFor(c)}"></i>${esc(c)}</span>`).join("");
 
-  const btns = $("attack-buttons");
-  S.config.classes.filter((c) => c !== "Normal").forEach((c) => {
-    const b = document.createElement("button");
-    b.className = "btn";
-    b.style.borderLeftColor = COLORS[c];
-    b.textContent = c;
-    b.addEventListener("click", () => launchAttack(c, b));
-    btns.appendChild(b);
+  const attackOptions = S.config.classes.filter((c) => c !== "Normal")
+    .map((c) => `<option>${esc(c)}</option>`).join("");
+  $("atk-class").innerHTML = attackOptions;
+  $("incident-class").insertAdjacentHTML("beforeend", attackOptions);
+  incidentFilters.forEach((id) => $(id).addEventListener("input", renderIncidents));
+  $("clear-filters").addEventListener("click", () => {
+    incidentFilters.forEach((id) => { $(id).value = ""; });
+    renderIncidents();
+    $("incident-search").focus();
+  });
+  $("incidents").addEventListener("click", (e) => {
+    const row = e.target.closest(".inc");
+    if (row) openDrawer(row.dataset.id);
+  });
+
+  const simulation = $("simulation");
+  $("show-simulation").addEventListener("click", () => simulation.showModal());
+  $("simulation-close").addEventListener("click", () => simulation.close());
+  $("simulation-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    simulation.close();
+    await launchAttack($("atk-class").value, $("show-simulation"));
   });
 
   const sel = $("t-class");
@@ -99,65 +138,34 @@ function setupStatic() {
   });
   $("t-load").addEventListener("click", loadSample);
   $("t-send").addEventListener("click", sendEntry);
-  $("dr-close").addEventListener("click", closeDrawer);
-  $("drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") closeDrawer(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
-
-  // Focus trap inside modal drawer
-  $("drawer").addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
-    const focusables = Array.from(
-      $("drawer").querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
-    ).filter((el) => !el.disabled && el.offsetParent !== null);
-    if (!focusables.length) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      last.focus();
-      e.preventDefault();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      first.focus();
-      e.preventDefault();
-    }
+  $("dr-close").addEventListener("click", () => closeDrawer());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("incidents-view").hidden) closeDrawer();
+  });
+  $("evidence-row").addEventListener("input", selectEvidenceRow);
+  $("back-live").addEventListener("click", returnToLive);
+  $("back-incident").addEventListener("click", () => {
+    const { id, rows } = S.evidence;
+    returnToLive();
+    openDrawer(id, rows);
   });
 
   // Interactive timeline scrubbing / inspection on telemetry canvas
-  const chartEl = $("chart");
-  const tipEl = $("chart-tip");
-  if (chartEl && tipEl) {
-    chartEl.addEventListener("pointermove", (e) => {
-      if (!S.recent.length) return;
-      const rect = chartEl.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const pad = { l: 34, r: 10, t: 10, b: 20 };
-      const iw = rect.width - pad.l - pad.r;
-      const n = 300;
-      const rows = S.recent;
-      const relX = mx - pad.l;
-      if (relX < 0 || relX > iw) {
-        tipEl.classList.remove("visible");
-        return;
-      }
-      const idx = Math.round((relX / iw) * (n - 1) - (n - rows.length));
-      if (idx >= 0 && idx < rows.length) {
-        const r = rows[idx];
-        const ih = (rect.height || 260) - pad.t - pad.b;
-        const py = pad.t + ih * (1 - r.threat);
-        const px = pad.l + iw * (idx + (n - rows.length)) / (n - 1);
-        tipEl.innerHTML = `<b>${fmtTime(r.ts)}</b> · ${cls(r.predicted_class)}<br>threat: <b>${(r.threat * 100).toFixed(1)}%</b> · conf: <b>${r.confidence.toFixed(3)}</b>`;
-        tipEl.style.left = px + "px";
-        tipEl.style.top = py + "px";
-        tipEl.classList.add("visible");
-      } else {
-        tipEl.classList.remove("visible");
-      }
-    });
-    chartEl.addEventListener("pointerleave", () => {
-      tipEl.classList.remove("visible");
-    });
-  }
+  $("chart").addEventListener("pointermove", inspectChartPointer);
+  $("chart").addEventListener("pointerleave", () => $("chart-tip").classList.remove("visible"));
 
   window.addEventListener("resize", drawChart);
+}
+
+function showWorkspace(view) {
+  $("chart-tip").classList.remove("visible");
+  Object.keys(workspaces).forEach((name) => {
+    $(name + "-view").hidden = name !== view;
+    $("show-" + name).setAttribute("aria-pressed", String(name === view));
+  });
+  $("workspace-title").textContent = workspaces[view];
+  $("show-simulation").hidden = view !== "lab";
+  if (view === "live") drawChart();
 }
 
 // ------------------------------------------------------------------------- //
@@ -179,15 +187,17 @@ let chartDirty = false;
 function onBatch(b) {
   if (b.telemetry && b.telemetry.length) {
     S.recent.push(...b.telemetry);
-    if (S.recent.length > 300) S.recent.splice(0, S.recent.length - 300);
+    if (S.recent.length > liveRowLimit) S.recent.splice(0, S.recent.length - liveRowLimit);
     b.telemetry.forEach(trackRow);
     // Note: high-frequency flash("pc-rows") reflow removed to eliminate main-thread layout thrashing
     renderFeed();
-    chartDirty = true;
+    if (!S.evidence) chartDirty = true;
   }
   (b.incidents || []).forEach(onIncidentEvent);
   (b.reports || []).forEach(onReportEvent);
   if ((b.incidents || []).some((e) => e.event !== "entry_decision") || (b.reports || []).length) renderIncidents();
+  if (drawerSelection && ((b.incidents || []).some((e) => e.event !== "entry_decision" && e.incident_id === drawerSelection.id)
+      || (b.reports || []).some((e) => e.incident_id === drawerSelection.id))) renderDrawer();
   if (b.stats) renderStats(b.stats);
   if (S.tracker) renderTracker();
 }
@@ -210,7 +220,6 @@ function onIncidentEvent(e) {
   const merged = { ...cur, ...e };
   if (e.event === "opened") {
     merged.status = "open";
-    merged.fresh = true;
     flash("pc-inc");
     const t = S.tracker;
     if (t && (e.trigger_entry_ids || []).some((id) => t.ids.has(id))) t.incidentId = e.incident_id;
@@ -222,7 +231,7 @@ function onIncidentEvent(e) {
 }
 
 function onReportEvent(e) {
-  const cur = S.incidents.get(e.incident_id) || { incident_id: e.incident_id, attack_class: e.attack_class };
+  const cur = { incident_id: e.incident_id, attack_class: e.attack_class, ...S.incidents.get(e.incident_id) };
   if (e.event === "started") {
     Object.assign(cur, { report_status: "RUNNING", report_mode: e.mode, report_started_ts: e.started_ts });
   } else if (e.event === "finished") {
@@ -234,7 +243,6 @@ function onReportEvent(e) {
     flash("pc-rep");
   }
   S.incidents.set(e.incident_id, cur);
-  if ($("drawer").classList.contains("open") && $("drawer").dataset.id === e.incident_id) openDrawer(e.incident_id, true);
 }
 
 function flash(id) {
@@ -249,6 +257,9 @@ function renderStats(s) {
   $("pill-kafka").classList.toggle("ok", !!s.kafka_ok);
   $("st-rate").textContent = s.rows_per_sec;
   $("st-acc").textContent = pct(s.accuracy);
+  const dataset = s.replay_dataset;
+  $("st-dataset").textContent = dataset === "raw" ? "Raw telemetry"
+    : dataset === "noised" ? "Noised telemetry" : dataset || "unknown";
   $("st-lat").textContent = s.latency_p50_ms == null ? "–" : Math.round(s.latency_p50_ms) + " ms";
   $("pc-rows").textContent = s.rows_total.toLocaleString();
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
@@ -260,80 +271,190 @@ function renderFeed() {
   $("feed").innerHTML = rows.map((r) => {
     const inj = r.source !== "replay";
     return `<tr class="${inj ? "injected" : ""}"><td>${fmtTime(r.ts)}</td>
-      <td><span class="src ${inj ? "inj" : ""}">${esc(r.source)}</span></td>
+      <td><span class="src ${inj ? "inj" : ""}" title="${esc(r.source)}">${inj ? "Injected" : "Replay"}</span></td>
       <td>${r.true_class ? cls(r.true_class) : "–"}</td><td>${cls(r.predicted_class)}</td>
       <td>${r.confidence.toFixed(2)}</td></tr>`;
   }).join("");
+}
+
+function chartLayout(width, height) {
+  const rows = S.evidence?.rows ?? S.recent;
+  const slots = S.evidence ? Math.max(2, rows.length) : liveRowLimit;
+  const offset = slots - rows.length;
+  const step = (width - chartPad.l - chartPad.r) / (slots - 1);
+  return {
+    rows,
+    x: (i) => chartPad.l + step * (i + offset),
+    y: (score) => chartPad.t + (height - chartPad.t - chartPad.b) * (1 - score),
+    index: (x) => Math.round((x - chartPad.l) / step) - offset,
+  };
+}
+
+function inspectChartPointer(event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const layout = chartLayout(rect.width, rect.height);
+  const pointerX = event.clientX - rect.left;
+  const index = layout.index(pointerX);
+  const row = layout.rows[index];
+  const tip = $("chart-tip");
+  if (!row || pointerX < chartPad.l || pointerX > rect.width - chartPad.r) {
+    tip.classList.remove("visible");
+    return;
+  }
+  const trigger = S.evidence?.triggerIds.has(row.entry_id) ? "<br>Incident trigger row" : "";
+  tip.innerHTML = `<b>${fmtTime(row.ts)}</b> · ${cls(row.predicted_class)}<br>threat: <b>${pct(row.threat)}</b> · conf: <b>${row.confidence.toFixed(3)}</b>${trigger}`;
+  const half = tip.offsetWidth / 2;
+  tip.style.left = Math.max(half, Math.min(rect.width - half, layout.x(index))) + "px";
+  tip.style.top = layout.y(row.threat) + "px";
+  tip.classList.add("visible");
 }
 
 function drawChart() {
   const c = $("chart");
   const dpr = window.devicePixelRatio || 1;
   const W = c.clientWidth, H = c.clientHeight || 260;
+  if (!W) return;
   c.width = W * dpr; c.height = H * dpr;
   const g = c.getContext("2d");
   g.scale(dpr, dpr);
-  const pad = { l: 34, r: 10, t: 10, b: 20 };
-  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
-  const y = (v) => pad.t + ih * (1 - v);
+  const pad = chartPad;
+  const { rows, x, y } = chartLayout(W, H);
+  const evidence = S.evidence;
+
+  if (evidence) {
+    const start = Math.max(pad.l, x(evidence.first) - 5);
+    const end = Math.min(W - pad.r, x(evidence.last) + 5);
+    g.fillStyle = accent;
+    g.globalAlpha = .16;
+    g.fillRect(start, pad.t, end - start, H - pad.t - pad.b);
+    g.globalAlpha = 1;
+    g.strokeStyle = accent;
+    g.strokeRect(start, pad.t, end - start, H - pad.t - pad.b);
+  }
 
   g.font = "11px system-ui, sans-serif";
-  g.fillStyle = "#8fa0bb"; g.strokeStyle = "#1c2a45"; g.lineWidth = 1;
+  g.fillStyle = palette.getPropertyValue("--muted");
+  g.strokeStyle = palette.getPropertyValue("--line");
+  g.lineWidth = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
     g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(W - pad.r, y(v)); g.stroke();
     g.fillText(v.toFixed(2), 2, y(v) + 4);
   });
   const thr = S.config ? S.config.guards.min_confidence : 0.7;
-  g.setLineDash([5, 4]); g.strokeStyle = "#f5b84d";
+  g.setLineDash([5, 4]); g.strokeStyle = thresholdColor;
   g.beginPath(); g.moveTo(pad.l, y(thr)); g.lineTo(W - pad.r, y(thr)); g.stroke();
   g.setLineDash([]);
-  g.fillStyle = "#f5b84d"; g.fillText("evidence ≥ " + thr, W - pad.r - 84, y(thr) - 4);
+  g.fillStyle = thresholdColor; g.fillText("evidence ≥ " + thr, W - pad.r - 84, y(thr) - 4);
 
-  const rows = S.recent, n = 300;
-  const x = (i) => pad.l + iw * (i + (n - rows.length)) / (n - 1);
   g.strokeStyle = "rgba(143,160,187,.35)"; g.beginPath();
   rows.forEach((r, i) => (i ? g.lineTo(x(i), y(r.threat)) : g.moveTo(x(i), y(r.threat))));
   g.stroke();
   rows.forEach((r, i) => {
-    const evidence = r.predicted_class !== "Normal" && r.confidence >= thr;
-    const rad = evidence ? 4 : 2.2;
-    g.fillStyle = COLORS[r.predicted_class] || "#888";
+    const passesGuard = r.predicted_class !== "Normal" && r.confidence >= thr;
+    const rad = passesGuard ? 4 : 2.2;
+    g.fillStyle = colorFor(r.predicted_class);
     g.beginPath(); g.arc(x(i), y(r.threat), rad, 0, Math.PI * 2); g.fill();
     if (r.source !== "replay") {
       g.strokeStyle = "#e6ecf5"; g.lineWidth = 1.2;
       g.beginPath(); g.arc(x(i), y(r.threat), rad + 2.5, 0, Math.PI * 2); g.stroke();
     }
+    if (evidence?.triggerIds.has(r.entry_id)) {
+      g.fillStyle = accent;
+      g.fillRect(x(i) - 2, y(r.threat) + 8, 4, 4);
+    }
+    if (evidence?.selected === i) {
+      g.strokeStyle = accent; g.lineWidth = 2;
+      g.beginPath(); g.arc(x(i), y(r.threat), rad + 5, 0, Math.PI * 2); g.stroke();
+    }
   });
   g.fillStyle = "#8fa0bb";
-  g.fillText("older", pad.l, H - 5);
-  g.fillText("now", W - pad.r - 22, H - 5);
+  g.fillText(evidence ? "snapshot start" : "older", pad.l, H - 5);
+  g.textAlign = "right";
+  g.fillText(evidence ? "snapshot end" : "now", W - pad.r, H - 5);
+}
+
+function showEvidence(selection, triggerIds, matching) {
+  const first = matching[0];
+  const last = matching.at(-1);
+  S.evidence = { id: selection.id, rows: selection.rows, triggerIds, first, last, selected: first };
+  closeDrawer(false);
+  $("chart-heading").textContent = "Incident telemetry";
+  $("chart").setAttribute("aria-label", "Snapshot of telemetry with incident trigger rows marked");
+  $("chart-evidence").hidden = false;
+  $("evidence-summary").textContent = `${selection.id} · ${matching.length} of ${triggerIds.size} trigger rows captured`;
+  const range = $("evidence-row");
+  range.max = selection.rows.length;
+  range.value = first + 1;
+  selectEvidenceRow();
+  showWorkspace("live");
+  range.focus();
+}
+
+function selectEvidenceRow() {
+  const evidence = S.evidence;
+  if (!evidence) return;
+  const range = $("evidence-row");
+  evidence.selected = Number(range.value) - 1;
+  const row = evidence.rows[evidence.selected];
+  const trigger = evidence.triggerIds.has(row.entry_id) ? " · Incident trigger row" : "";
+  const detail = `Row ${range.value} of ${evidence.rows.length} · ${fmtTime(row.ts, true)} · ${row.predicted_class} · Threat ${pct(row.threat)} · Confidence ${row.confidence.toFixed(3)}${trigger}`;
+  $("evidence-detail").textContent = detail;
+  range.setAttribute("aria-valuetext", detail);
+  drawChart();
+}
+
+function returnToLive() {
+  S.evidence = null;
+  $("chart-evidence").hidden = true;
+  $("chart-tip").classList.remove("visible");
+  $("chart-heading").textContent = "Live telemetry";
+  $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
+  drawChart();
+  $("chart-heading").focus();
 }
 
 // ------------------------------------------------------------------------- //
 // Incidents + drawer
 // ------------------------------------------------------------------------- //
+function reportState(i) {
+  if (!i.report_status) return "queued";
+  if (i.report_status === "RUNNING") return "running";
+  if (i.report_status === "ERROR") return "error";
+  return "ready";
+}
+
 function agentBadge(i) {
-  const s = i.report_status;
-  if (!s) return `<span class="badge">queued for AI</span>`;
-  if (s === "RUNNING") return `<span class="badge run">AI analysing…</span>`;
-  if (s === "ERROR") return `<span class="badge err">AI error</span>`;
-  return `<span class="badge done">report ready</span>`;
+  const state = reportState(i);
+  const labels = { queued: "AI queued", running: "AI analysing", error: "AI error", ready: "Report ready" };
+  const styles = { running: "run", error: "err", ready: "done" };
+  return `<span class="badge ${styles[state] || ""}">${labels[state]}</span>`;
 }
 
 function renderIncidents() {
-  const list = [...S.incidents.values()].filter((i) => i.opened_ts).sort((a, b) => b.opened_ts - a.opened_ts);
-  $("inc-count").textContent = list.length ? `${list.filter((i) => i.status === "open").length} open · ${list.length} total` : "";
-  if (!list.length) return;
-  $("incidents").innerHTML = list.map((i) => `
-    <button class="inc ${i.fresh ? "fresh" : ""}" data-id="${esc(i.incident_id)}">
-      <span class="bar" style="background:${COLORS[i.attack_class] || "#888"}"></span>
-      <span><span class="t">${esc(i.attack_class)}</span> <span class="m">${esc(i.incident_id)}</span><br>
-        <span class="m">${fmtTime(i.opened_ts)} · ${i.row_count} rows · peak ${(i.peak_confidence ?? 0).toFixed(3)}
-        ${i.status === "closed" && i.duration_sec != null ? ` · lasted ${i.duration_sec}s` : ""}</span></span>
-      <span>${i.status === "open" ? `<span class="badge open">open</span>` : `<span class="badge">closed</span>`} ${agentBadge(i)}</span>
-    </button>`).join("");
-  list.forEach((i) => delete i.fresh);
-  $("incidents").querySelectorAll(".inc").forEach((b) => b.addEventListener("click", () => openDrawer(b.dataset.id)));
+  const all = [...S.incidents.values()].filter((i) => i.opened_ts).sort((a, b) => b.opened_ts - a.opened_ts);
+  const [search, attackClass, state, report] = incidentFilters.map((id) => $(id).value);
+  const query = search.trim().toLowerCase();
+  const list = all.filter((i) => (!attackClass || i.attack_class === attackClass)
+    && (!state || i.status === state) && (!report || reportState(i) === report)
+    && (!query || [i.incident_id, i.attack_class].some((value) => value?.toLowerCase().includes(query))));
+  $("clear-filters").hidden = !(search || attackClass || state || report);
+  $("inc-count").textContent = `${list.length} of ${all.length} loaded · ${list.filter((i) => i.status === "open").length} open`;
+  const focused = document.activeElement;
+  const groups = ["open", "closed"].map((status) => {
+    const incidents = list.filter((i) => i.status === status);
+    if (!incidents.length) return "";
+    const title = status === "open" ? "Open" : "Closed";
+    return `<section class="incident-group">
+      <h3><i class="status-mark ${status}" aria-hidden="true"></i>${title} <span>${incidents.length}</span></h3>
+      ${incidents.map((i) => `<button type="button" class="inc" data-id="${esc(i.incident_id)}" aria-pressed="${drawerSelection?.id === i.incident_id}">
+        <span class="incident-name">${cls(i.attack_class)} <span class="m">${esc(i.incident_id)}</span></span>
+        <span class="incident-meta m">${fmtTime(i.opened_ts)} · ${i.row_count ?? "–"} rows · ${pct(i.peak_confidence)} peak</span>
+        <span>${agentBadge(i)}</span>
+      </button>`).join("")}
+    </section>`;
+  }).join("");
+  $("incidents").innerHTML = groups || `<div class="queue-empty"><strong>${all.length ? "No matching incidents" : "No incidents yet"}</strong><p>${all.length ? "Clear or change the filters to see more incidents." : "New incidents appear here when telemetry meets the detection criteria."}</p></div>`;
+  if (focused.matches(".inc")) restoreIncidentFocus(focused);
 }
 
 // Tiny Markdown renderer for agent output (escapes first, then formats).
@@ -366,22 +487,47 @@ function md(text) {
   return html;
 }
 
-async function openDrawer(id, quiet) {
-  if (!quiet) {
-    lastFocusedElement = document.activeElement;
-  }
-  let i = S.incidents.get(id) || {};
-  if (!quiet) {
-    try {
-      const r = await fetch(`/api/incidents/${encodeURIComponent(id)}`);
-      if (r.ok) { i = { ...i, ...(await r.json()) }; S.incidents.set(id, i); }
-    } catch (_) { /* live data is enough */ }
-  }
+async function openDrawer(id, evidenceRows) {
+  const selection = {
+    id,
+    rows: evidenceRows ?? [...new Map(S.recent.map((row) => [row.entry_id, row])).values()],
+    opener: document.activeElement,
+  };
+  const cached = S.incidents.get(id) || {};
+  drawerSelection = selection;
+  showWorkspace("incidents");
+  $("drawer").hidden = false;
+  $("incidents-view").classList.add("has-detail");
+  renderIncidents();
+  renderDrawer();
+  $("dr-close").focus();
+
+  try {
+    const response = await fetch(`/api/incidents/${encodeURIComponent(id)}`);
+    if (!response.ok) return; // the recorder may not have persisted the event yet
+    const stored = await response.json();
+    if (drawerSelection !== selection) return;
+    const current = S.incidents.get(id) || {};
+    const liveChanges = Object.fromEntries(Object.entries(current).filter(([key, value]) => value !== cached[key]));
+    S.incidents.set(id, { ...cached, ...stored, ...liveChanges });
+    renderDrawer();
+  } catch (_) { /* keep the incident data already shown */ }
+}
+
+function renderDrawer() {
+  const selection = drawerSelection;
+  const { id, rows } = selection;
+  const i = S.incidents.get(id) || {};
+  const triggerIds = new Set(i.trigger_entry_ids || []);
+  const matching = rows.map((row, index) => triggerIds.has(row.entry_id) ? index : -1).filter((index) => index >= 0);
+  const evidenceSummary = triggerIds.size ? `${matching.length} of ${triggerIds.size} trigger rows available in the live buffer.`
+    : "No trigger rows recorded for this incident.";
+  const evidenceFocused = document.activeElement?.id === "view-trigger-rows";
   const status = i.report_status;
   const reportBody = !status
     ? `<p class="empty">Queued: the agent worker analyses one incident at a time.</p>`
     : status === "RUNNING"
-      ? `<p class="empty">The 4 agents are working on this incident (started ${fmtTime(i.report_started_ts)}). On the Groq free tier this takes about 1–2 minutes.</p>`
+      ? `<p class="empty">The 4 agents are working on this incident (started ${fmtTime(i.report_started_ts, true)}). On the Groq free tier this takes about 1–2 minutes.</p>`
       : `${md(i.report)}`;
   $("dr-body").innerHTML = `
     <div class="dr-head">
@@ -389,7 +535,8 @@ async function openDrawer(id, quiet) {
       <span>${i.status === "open" ? `<span class="badge open">open</span>` : `<span class="badge">closed</span>`} ${agentBadge(i)}</span>
     </div>
     <div class="kv">
-      <div><small>Opened</small><b>${fmtTime(i.opened_ts)}</b></div>
+      <div><small>Opened</small><b>${fmtTime(i.opened_ts, true)}</b></div>
+      ${i.closed_ts != null ? `<div><small>Closed</small><b>${fmtTime(i.closed_ts, true)}</b></div>` : ""}
       <div><small>Rows</small><b>${i.row_count ?? "–"}</b></div>
       <div><small>Peak confidence</small><b>${(i.peak_confidence ?? 0).toFixed(4)}</b></div>
       <div><small>Mean confidence</small><b>${(i.mean_confidence ?? 0).toFixed(4)}</b></div>
@@ -401,31 +548,37 @@ async function openDrawer(id, quiet) {
       <div><small>Analysis time</small><b>${i.report_runtime_sec ?? "–"} s · ${esc(i.report_mode || "")}</b></div>` : ""}
     </div>
     ${i.close_reason ? `<p class="hint">Closed: ${esc(i.close_reason)}</p>` : ""}
+    <div class="section"><h4>Telemetry evidence</h4>
+      <p class="hint">${evidenceSummary}</p>
+      ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
+    </div>
     <div class="section"><h4>Incident report</h4><div class="md">${reportBody}</div></div>
     ${status && status !== "RUNNING" ? `
     <div class="section"><h4>SPARTA threat context</h4><div class="md">${md(i.sparta_context)}</div></div>
     <div class="section"><h4>Mitigation</h4><div class="md">${md(i.mitigation)}</div></div>` : ""}`;
-  const d = $("drawer");
-  d.dataset.id = id;
-  d.classList.add("open");
-  d.setAttribute("aria-hidden", "false");
-  document.body.style.overflow = "hidden";
-  setTimeout(() => $("dr-close").focus(), 60);
+  const button = $("view-trigger-rows");
+  button?.addEventListener("click", () => showEvidence(selection, triggerIds, matching));
+  if (evidenceFocused) (button ?? $("dr-close")).focus({ preventScroll: true });
 }
 
-function closeDrawer() {
-  const d = $("drawer");
-  d.classList.remove("open");
-  d.setAttribute("aria-hidden", "true");
-  document.body.style.overflow = "";
-  if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
-    lastFocusedElement.focus();
-    lastFocusedElement = null;
-  }
+function closeDrawer(restoreFocus = true) {
+  if (!drawerSelection) return;
+  const { opener } = drawerSelection;
+  drawerSelection = null;
+  $("drawer").hidden = true;
+  $("incidents-view").classList.remove("has-detail");
+  renderIncidents();
+  if (restoreFocus) restoreIncidentFocus(opener);
+}
+
+function restoreIncidentFocus(opener) {
+  const id = opener.dataset.id;
+  const row = id && $("incidents").querySelector(`[data-id="${CSS.escape(id)}"]`);
+  (row || $("incident-search")).focus({ preventScroll: true });
 }
 
 // ------------------------------------------------------------------------- //
-// Entry points: test panel + attack buttons
+// Entry points: test panel and simulation
 // ------------------------------------------------------------------------- //
 async function loadSample() {
   const c = $("t-class").value, q = $("t-quality").value;
@@ -467,6 +620,16 @@ function showSending(label) {
     step("wait", "Incident", "") + step("wait", "AI report", "");
 }
 
+function setRunPending(pending) {
+  $("t-send").disabled = pending;
+  $("show-simulation").disabled = pending;
+}
+
+function showRunFailure(message) {
+  $("tracker").firstElementChild.outerHTML = step("err", "Submission failed", "Check the connection and try again.");
+  toast(message, "error");
+}
+
 function trackRow(r) {
   const t = S.tracker;
   if (t && t.ids.has(r.entry_id)) t.rows.set(r.entry_id, r);
@@ -495,7 +658,7 @@ async function sendEntry() {
   // Edited rows have no known ground truth, so don't count them toward accuracy.
   const trueClass = edited ? null : ($("t-features").dataset.trueClass || null);
   const btn = $("t-send");
-  btn.disabled = true;
+  setRunPending(true);
   showSending(`${burst ? count + "× " : ""}test entry`);
   try {
     const r = await fetch("/api/panel/send", {
@@ -507,16 +670,17 @@ async function sendEntry() {
     startTracker(burst ? "burst" : "once", j.entry_ids,
       `${burst ? count + "× " : ""}test entry${edited ? ` (${edited} field${edited > 1 ? "s" : ""} edited)` : ""}`, trueClass);
   } catch (e) {
-    toast("Send failed: " + e.message, "error");
+    showRunFailure("Send failed: " + e.message);
   } finally {
-    btn.disabled = false;
+    setRunPending(false);
+    if (!$("lab-view").hidden && document.activeElement === document.body) btn.focus();
   }
 }
 
 async function launchAttack(c, btn) {
   const quality = $("atk-quality").value;
-  const count = Math.max(1, Math.min(100, +$("atk-count").value || 15));
-  btn.disabled = true;
+  const count = Number($("atk-count").value);
+  setRunPending(true);
   showSending(`${c} attack (${count} ${quality} rows)`);
   try {
     const r = await fetch("/api/attack", {
@@ -527,9 +691,10 @@ async function launchAttack(c, btn) {
     if (!r.ok) throw new Error(j.detail || r.statusText);
     startTracker("burst", j.entry_ids, `${c} attack (${count} ${quality} rows)`, c);
   } catch (e) {
-    toast("Attack failed: " + e.message, "error");
+    showRunFailure("Simulation failed: " + e.message);
   } finally {
-    btn.disabled = false;
+    setRunPending(false);
+    if (!$("lab-view").hidden && document.activeElement === document.body) btn.focus();
   }
 }
 
@@ -589,8 +754,10 @@ function renderTracker() {
     items.push(step("done", "AI report", `${esc(inc.report_status)} in ${inc.report_runtime_sec}s · <button class="linkish" data-open="${esc(inc.incident_id)}">View report</button>`));
   }
 
+  const focused = document.activeElement;
   $("tracker").innerHTML = items.join("");
   $("tracker").querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDrawer(b.dataset.open)));
+  if (focused.matches("[data-open]")) restoreIncidentFocus(focused);
 }
 // Keep the "analysing… Ns" timer ticking.
 setInterval(() => { const t = S.tracker; if (t && t.incidentId) renderTracker(); }, 1000);
