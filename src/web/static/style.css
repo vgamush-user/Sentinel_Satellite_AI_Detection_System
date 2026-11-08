@@ -22,6 +22,10 @@
   --c-di: #6c478c;
   --c-dim: #346a9b;
   --radius: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
 
   /* Motion Tokens (Emil Kowalski Design Engineering Standards) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -142,10 +146,10 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
   background: var(--panel-2); color: var(--text);
 }
 .workspace-nav .btn[aria-pressed="true"] svg { color: var(--accent); }
-.grid { display: grid; gap: 10px; align-items: start; padding: 0; }
+.grid { display: grid; gap: var(--space-3); align-items: start; padding: 0; }
 [hidden] { display: none !important; }
 #lab-view { grid-template-columns: minmax(0, 1fr) minmax(195px, 26%); }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3) var(--space-4); min-width: 0; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .card-head h2 { font-size: 18px; }
 .card-head h2[tabindex]:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
@@ -438,8 +442,15 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   .nav-section { display: none; }
   .scenario-cards { grid-template-columns: 1fr; }
   .telemetry-columns { display: none; }
-  .telemetry-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .telemetry-row small { position: static; width: auto; height: auto; clip-path: none; display: block; font-size: 12px; }
+  .telemetry-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 8px; align-items: baseline; }
+  .feed-prediction { grid-column: 1 / 3; font-weight: 600; }
+  .feed-confidence { grid-column: 3; text-align: right; }
+  .feed-confidence small { position: static; width: auto; height: auto; clip-path: none; margin-right: 4px; font-size: 11px; }
+  .feed-time, .feed-label, .feed-source { color: var(--muted); font-size: 12px; }
+  .feed-label .cls { display: inline; }
+  .feed-label .cls i { display: none; }
+  .feed-label::before { content: "Label: "; }
+  .feed-source .badge { font-size: 11px; padding: 2px 4px; }
   .lab-modes { grid-template-columns: 1fr; }
   .lab-modes > div + div { border-left: 0; padding: 12px 0 0; border-top: 1px solid var(--line); }
 }
@@ -458,9 +469,14 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .chart-main { min-width: 0; padding: 13px; }
 .chart-total { font-size: 30px; font-weight: 750; line-height: 1.1; letter-spacing: -.05em; margin: 0; font-variant-numeric: tabular-nums; }
 #card-chart .card-head { align-items: start; margin-bottom: 8px; }
-#chart-heading { display: inline; font-size: 12px; font-weight: 550; color: var(--muted); }
+#chart-heading { font-size: 22px; letter-spacing: -.025em; }
+.chart-scope, .chart-dataset { margin: 2px 0; color: var(--muted); font-size: 12px; }
+.is-snapshot #card-chart { grid-template-columns: minmax(0, 1fr); }
+.snapshot-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 13px; border-top: 1px solid var(--line); }
+.snapshot-header .hint { margin: 0; overflow-wrap: anywhere; }
+.trigger-label { display: block; font-size: 12px; color: var(--accent); }
+.evidence-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .chart-dataset { display: inline; margin: 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
-.chart-dataset::before { content: " · "; }
 .chart-dataset strong { color: var(--text); }
 #card-chart .legend { gap: 3px 8px; margin-bottom: 6px; font-size: 11px; }
 .telemetry-status { display: grid; align-content: space-between; gap: 13px; border-left: 1px solid var(--line); padding: 15px 11px; }
@@ -480,7 +496,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .telemetry-row[aria-pressed="true"] { background: var(--panel-2); box-shadow: inset 3px 0 var(--accent); }
 .telemetry-inspector { grid-area: inspector; position: sticky; top: 12px; }
 .telemetry-inspector > .card + .card { margin-top: 10px; }
-.snapshot-state .btn { font-size: 12px; margin-bottom: 10px; }
 .telemetry-inspector .inspector-facts > div { flex-wrap: wrap; gap: 2px 8px; }
 .telemetry-inspector .inspector-facts dd { margin-left: auto; }
 .chart-guide { margin-top: 4px; font-size: 12px; color: var(--muted); }
@@ -517,6 +532,10 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 #overview-view .intro { grid-column: 1; grid-row: 1; padding: 16px; }
 #overview-view .session-summary { grid-column: 2; grid-row: 1; align-self: stretch; }
 #overview-view .scenarios { grid-column: 1 / -1; grid-row: 2; }
+.mobile-freshness { display: none; }
+.telemetry-status.is-stale .replay-metric:not(:has(#pill-kafka)) { color: var(--muted); }
+.telemetry-status.is-stale .replay-metric:first-child > span::after { content: " · Last received"; }
+.telemetry-row[aria-pressed="true"] { background: var(--panel-2); box-shadow: inset 2px 0 var(--accent); }
 #method-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #method-view .methodology:last-child { grid-column: 1 / -1; }
 #method-view .agent-trace { grid-template-columns: 1fr; }
@@ -545,8 +564,11 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   .top .btn { font-size: 13px; }
   #live-view, #incidents-view, #lab-view { padding: 0; gap: 10px; }
   #live-view:not(.is-snapshot) { grid-template-areas: "chart" "feed" "inspector" "pipeline"; }
+  #live-view:not(.is-snapshot) .inspector-guide { display: none; }
+  #live-view:not(.is-snapshot) .inspector-facts { margin-bottom: 0; }
   #card-chart { grid-template-columns: minmax(0, 1fr); }
-  .telemetry-status { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 10px; border-left: 0; border-top: 1px solid var(--line); gap: 6px; }
+  .telemetry-status { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; border-left: 0; border-top: 1px solid var(--line); gap: 8px 12px; }
+  .mobile-freshness { display: block; font-size: 11px; }
   .replay-metric strong { font-size: 14px; }
   #chart { height: 146px; }
   #card-chart .hint { font-size: 12px; }

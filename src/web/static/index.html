@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SentinelSat · CubeSat telemetry security</title>
-  <link rel="stylesheet" href="/static/style.css?v=acru-2">
+  <link rel="stylesheet" href="/static/style.css?v=acru-3">
 </head>
 <body>
 <div class="dashboard-shell">
@@ -79,9 +79,9 @@
     <div class="chart-main">
       <div class="card-head">
         <div>
-          <p class="chart-total" id="chart-total">–</p>
-          <h2 id="chart-heading" tabindex="-1">Rows scored</h2>
-          <p class="chart-dataset"><span>Replay dataset</span> · <strong id="st-dataset">Unknown</strong></p>
+          <h2 id="chart-heading" tabindex="-1">Threat score</h2>
+          <p class="chart-scope" id="chart-scope">Recent scored telemetry · up to 300 rows</p>
+          <p class="chart-dataset" id="chart-dataset">Replay dataset · <strong id="st-dataset">Unknown</strong></p>
         </div>
         <span class="badge" id="chart-mode">Live replay</span>
       </div>
@@ -93,17 +93,18 @@
         <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
       </details>
     </div>
-    <div class="telemetry-status" aria-label="Replay system status">
-      <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong></div>
+    <div class="telemetry-status" id="replay-metrics" aria-label="Replay session metrics">
+      <div class="replay-metric"><span>Rows scored this session</span><strong class="chart-total" id="chart-total">–</strong></div>
+      <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong><small class="mobile-freshness" id="mobile-freshness"></small></div>
       <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
       <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
     </div>
+    <div class="snapshot-header" id="snapshot-header" hidden><p id="evidence-summary" class="hint"></p><button type="button" class="btn" id="back-live">Resume live view</button></div>
   </section>
 
   <aside class="telemetry-inspector" aria-labelledby="telemetry-inspector-title">
     <section class="card">
-      <p class="dashboard-label">Row inspector</p>
-      <h2 id="telemetry-inspector-title">Selected telemetry</h2>
+      <h2 id="telemetry-inspector-title">Replay context</h2>
       <div id="live-context">
         <p class="inspector-guide">Select a recent row to inspect its prediction and evidence.</p>
         <dl class="inspector-facts">
@@ -112,11 +113,11 @@
         </dl>
       </div>
       <div id="chart-evidence" class="evidence-controls" hidden>
-        <div class="snapshot-state"><p class="inspector-guide" id="evidence-summary"></p><button type="button" class="btn" id="back-live">Resume live view</button></div>
         <dl id="evidence-detail" class="inspector-facts"></dl>
         <label for="evidence-row">Inspect snapshot row</label>
         <input id="evidence-row" type="range" min="1" max="1" value="1" step="1">
-        <div class="evidence-actions"><button type="button" class="btn ghost" id="back-incident">Back to incident</button></div>
+        <p id="snapshot-position" class="hint"></p>
+        <div class="evidence-actions"><button type="button" class="btn ghost" id="previous-trigger" hidden>Previous trigger</button> <button type="button" class="btn ghost" id="next-trigger" hidden>Next trigger</button> <button type="button" class="btn ghost" id="back-incident">Back to incident</button></div>
       </div>
     </section>
     <section class="card prediction-mix" id="prediction-mix">
@@ -259,6 +260,6 @@
   </form>
 </dialog>
 <div id="toast-root" class="toast-container" aria-live="polite"></div>
-<script src="/static/app.js?v=acru-2"></script>
+<script src="/static/app.js?v=acru-3"></script>
 </body>
 </html>

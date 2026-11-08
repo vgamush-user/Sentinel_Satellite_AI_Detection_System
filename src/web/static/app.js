@@ -322,6 +322,17 @@ function setupStatic() {
   });
   $("evidence-row").addEventListener("input", selectEvidenceRow);
   $("back-live").addEventListener("click", returnToLive);
+  for (const [id, direction] of [["previous-trigger", -1], ["next-trigger", 1]]) {
+    $(id).addEventListener("click", () => {
+      const evidence = S.evidence;
+      const index = evidence?.triggerIndices.filter((i) => direction * (i - evidence.selected) > 0);
+      const target = direction < 0 ? index?.at(-1) : index?.[0];
+      if (target == null) return;
+      $("evidence-row").value = target + 1;
+      selectEvidenceRow();
+      if ($(id).disabled) $("evidence-row").focus();
+    });
+  }
   $("back-incident").addEventListener("click", () => {
     const { id, rows, incidentOpener } = S.evidence;
     openDrawer(id, rows, incidentOpener);
@@ -361,6 +372,10 @@ function connect() {
     clearInterval(ping);
     $("pill-kafka").classList.remove("ok");
     $("kafka-status").textContent = "Reconnecting to replay";
+    const message = "Reconnecting · showing last received values";
+    if ($("overview-session").textContent !== message) $("overview-session").textContent = message;
+    $("mobile-freshness").textContent = "Last received values";
+    $("replay-metrics").classList.add("is-stale");
     setTimeout(connect, 2000);
   };
 }
@@ -439,9 +454,11 @@ function renderStats(s) {
     : dataset === "noised" ? "Noised telemetry" : dataset || "unknown";
   $("st-lat").textContent = s.latency_p50_ms == null ? "–" : Math.round(s.latency_p50_ms) + " ms";
   $("st-last-row").textContent = s.last_row_age_sec == null ? "–" : `${s.last_row_age_sec.toFixed(1)} s ago`;
+  $("mobile-freshness").textContent = s.last_row_age_sec == null ? "" : "Last row " + $("st-last-row").textContent;
   $("st-incidents").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rows").textContent = s.rows_total.toLocaleString();
-  $("chart-total").textContent = s.rows_total.toLocaleString();
+  if (!S.evidence) $("chart-total").textContent = s.rows_total.toLocaleString();
+  $("replay-metrics").classList.toggle("is-stale", !s.kafka_ok);
   $("overview-session").textContent = `${$("st-dataset").textContent} · ${s.rows_total.toLocaleString()} rows scored · ${s.rows_per_sec} rows/s`;
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rep").textContent = (s.counts.reports_finished || 0).toLocaleString();
@@ -495,12 +512,17 @@ function renderFeed() {
       item = document.createElement("li");
       item.innerHTML = `<button type="button" class="telemetry-row" data-row="${esc(id)}">
     <span class="feed-prediction"><small>Predicted</small>${cls(row.predicted_class)}</span>
-    <span><small>Confidence</small>${row.confidence.toFixed(3)}</span>
+    <span class="feed-confidence"><small>Confidence</small>${row.confidence.toFixed(3)}</span>
     <span class="feed-time"><small>Time</small>${fmtTime(row.ts)}<span class="sr-only"> · Row ${esc(row.entry_id)}</span></span>
-    <span><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
-    <span><small>Source</small><span class="badge">${row.source === "replay" ? "Replay" : "Injected test"}</span></span>
+    <span class="feed-label"><small>Dataset label</small>${row.true_class ? cls(row.true_class) : "Unavailable"}</span>
+    <span class="feed-source"><small>Source</small><span class="badge">${row.source === "replay" ? "Replay" : "Injected test"}</span></span>
   </button>`;
     }
+    const trigger = Boolean(evidence?.triggerIds.has(row.entry_id));
+    item.firstElementChild.classList.toggle("is-trigger", trigger);
+    const marker = item.querySelector(".trigger-label");
+    if (trigger && !marker) item.querySelector(".feed-prediction").insertAdjacentHTML("beforeend", '<span class="trigger-label">Trigger row</span>');
+    if (!trigger) marker?.remove();
     const pressed = String(id === selectedId);
     if (item.firstElementChild.getAttribute("aria-pressed") !== pressed) item.firstElementChild.setAttribute("aria-pressed", pressed);
     if (item === next) next = next.nextElementSibling;
@@ -593,7 +615,14 @@ function showEvidence(selection, triggerIds, matching) {
 }
 
 function showSnapshot(snapshot) {
+  snapshot.triggerIndices = snapshot.rows.flatMap((row, index) => snapshot.triggerIds.has(row.entry_id) ? [index] : []);
   S.evidence = snapshot;
+  $("chart-heading").textContent = "Telemetry snapshot";
+  $("chart-scope").textContent = `${snapshot.rows.length} captured rows · ${fmtTime(snapshot.rows[0].ts, true)} to ${fmtTime(snapshot.rows.at(-1).ts, true)}`;
+  $("chart-dataset").hidden = true;
+  $("replay-metrics").hidden = true;
+  $("snapshot-header").hidden = false;
+  $("telemetry-inspector-title").textContent = "Selected evidence";
   $("live-view").classList.add("is-snapshot");
   showWorkspace("live");
   $("chart").setAttribute("aria-label", "Frozen telemetry snapshot with the selected row highlighted");
@@ -627,6 +656,11 @@ function selectEvidenceRow() {
     fact("Timestamp", fmtTime(row.ts, true)), fact("Source", source), fact("Row ID", row.entry_id),
     trigger ? fact("Incident evidence", "Trigger row") : "",
   ].join("");
+  $("snapshot-position").textContent = "Row " + range.value + " of " + evidence.rows.length;
+  for (const [id, direction] of [["previous-trigger", -1], ["next-trigger", 1]]) {
+    $(id).hidden = evidence.triggerIndices.length < 2;
+    $(id).disabled = !evidence.triggerIndices.some((i) => direction * (i - evidence.selected) > 0);
+  }
   range.setAttribute("aria-valuetext", `Row ${range.value} of ${evidence.rows.length} · ${fmtTime(row.ts, true)} · ${row.predicted_class}`);
   renderFeed();
   drawChart();
@@ -635,6 +669,13 @@ function selectEvidenceRow() {
 function returnToLive() {
   const openerId = S.evidence?.openerId;
   S.evidence = null;
+  $("chart-total").textContent = $("pc-rows").textContent;
+  $("chart-heading").textContent = "Threat score";
+  $("chart-scope").textContent = "Recent scored telemetry · up to 300 rows";
+  $("chart-dataset").hidden = false;
+  $("replay-metrics").hidden = false;
+  $("snapshot-header").hidden = true;
+  $("telemetry-inspector-title").textContent = "Replay context";
   $("live-view").classList.remove("is-snapshot");
   $("chart-evidence").hidden = true;
   $("live-context").hidden = false;
