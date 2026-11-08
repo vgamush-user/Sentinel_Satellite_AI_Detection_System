@@ -2,7 +2,6 @@
 // Sentinel live monitor client: initial state from /api/state, then live
 // batches over the /ws WebSocket (telemetry rows, incident and report events).
 
-const palette = getComputedStyle(document.documentElement);
 const CLASS_COLOR_TOKENS = new Map([
   ["Normal", "--c-normal"],
   ["Storage Exhaustion", "--c-se"],
@@ -586,8 +585,9 @@ function drawChart() {
   const pad = chartPad;
   const { rows, x, y } = chartLayout(W, H);
   const evidence = S.evidence;
-  const accent = palette.getPropertyValue("--accent").trim();
-  const muted = palette.getPropertyValue("--muted").trim();
+  const palette = getComputedStyle(c);
+  const accent = palette.getPropertyValue("--chart-accent").trim();
+  const muted = palette.getPropertyValue("--chart-ink").trim();
   const colors = new Map([...CLASS_COLOR_TOKENS].map(([name, token]) => [name, palette.getPropertyValue(token).trim()]));
 
   if (evidence?.first != null) {
@@ -603,7 +603,7 @@ function drawChart() {
 
   g.font = "11px system-ui, sans-serif";
   g.fillStyle = muted;
-  g.strokeStyle = palette.getPropertyValue("--line");
+  g.strokeStyle = palette.getPropertyValue("--chart-grid").trim();
   g.lineWidth = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
     g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(W - pad.r, y(v)); g.stroke();
@@ -879,7 +879,7 @@ function renderDrawer() {
   }).join("");
 
   body.innerHTML = `
-    <div class="incident-console">
+    <div class="panel-console incident-console">
       <div class="incident-console-meta"><span>${esc(id)}</span><span class="console-tag">${i.status === "open" ? "Open" : "Closed"}</span></div>
       <p class="console-label">Predicted class</p>
       <h3 id="dr-title">${esc(i.attack_class || "Unavailable")}</h3>

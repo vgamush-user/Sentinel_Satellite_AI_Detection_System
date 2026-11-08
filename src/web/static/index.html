@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SentinelSat · CubeSat telemetry security</title>
-  <link rel="stylesheet" href="/static/style.css?v=linear-cohere-1">
+  <link rel="stylesheet" href="/static/style.css?v=linear-cohere-4">
 </head>
 <body>
 <div class="dashboard-shell">
@@ -87,17 +87,21 @@
   </section>
 </section>
 
-<section class="grid" id="live-view" aria-labelledby="show-live" hidden>
-  <section class="card" id="card-chart">
+<section class="grid wide-workspace" id="live-view" aria-labelledby="show-live" hidden>
+    <div class="card telemetry-status" id="replay-metrics" aria-label="Replay session metrics">
+      <div class="replay-metric"><span>Rows scored this session</span><strong class="chart-total" id="chart-total">–</strong></div>
+      <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong><small class="replay-freshness" id="mobile-freshness"></small></div>
+      <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
+      <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
+    </div>
+  <section class="card panel-console" id="card-chart">
+    <header class="chart-console">
+      <p class="console-label">Scoring workspace</p>
+      <div class="console-heading"><h2 id="chart-heading" tabindex="-1">Threat score</h2><span class="console-tag" id="chart-mode">Live replay</span></div>
+      <p class="console-source" id="chart-scope">Recent scored telemetry · up to 300 rows</p>
+      <p class="console-source" id="chart-dataset">Replay dataset · <strong id="st-dataset">Unknown</strong></p>
+    </header>
     <div class="chart-main">
-      <div class="card-head">
-        <div>
-          <h2 id="chart-heading" tabindex="-1">Threat score</h2>
-          <p class="chart-scope" id="chart-scope">Recent scored telemetry · up to 300 rows</p>
-          <p class="chart-dataset" id="chart-dataset">Replay dataset · <strong id="st-dataset">Unknown</strong></p>
-        </div>
-        <span class="badge" id="chart-mode">Live replay</span>
-      </div>
       <div class="legend" id="legend"></div>
       <div class="chart-wrap" id="chart-wrap">
         <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
@@ -105,12 +109,6 @@
       <details class="chart-guide"><summary>How to read this chart</summary>
         <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
       </details>
-    </div>
-    <div class="telemetry-status" id="replay-metrics" aria-label="Replay session metrics">
-      <div class="replay-metric"><span>Rows scored this session</span><strong class="chart-total" id="chart-total">–</strong></div>
-      <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong><small class="mobile-freshness" id="mobile-freshness"></small></div>
-      <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
-      <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
     </div>
     <div class="snapshot-header" id="snapshot-header" hidden><p id="evidence-summary" class="hint"></p><button type="button" class="btn" id="back-live">Resume live view</button></div>
   </section>
@@ -142,9 +140,8 @@
   </aside>
 
   <section class="card" id="card-feed">
-    <div class="card-head"><h2 id="feed-heading" tabindex="-1">Recent telemetry rows</h2><span class="hint">Select a row to inspect</span></div>
+    <div class="card-head"><div><p class="dashboard-label">Evidence history</p><h2 id="feed-heading" tabindex="-1">Recent telemetry rows</h2></div><span class="hint">Select a row to inspect</span></div>
     <p class="hint" id="feed-held" role="status" hidden>Rows are held while you navigate the feed. Replay continues in the background.</p>
-    <div class="telemetry-columns" aria-hidden="true"><span>Predicted</span><span>Confidence</span><span>Time</span><span>Dataset label</span><span>Source</span></div>
     <ul id="feed" class="telemetry-rows"><li class="hint">Waiting for scored telemetry.</li></ul>
   </section>
   <details class="pipeline-details">
@@ -277,6 +274,6 @@
   </form>
 </dialog>
 <div id="toast-root" class="toast-container" aria-live="polite"></div>
-<script src="/static/app.js?v=linear-cohere-1"></script>
+<script src="/static/app.js?v=linear-cohere-4"></script>
 </body>
 </html>
