@@ -157,6 +157,13 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
 
 /* Fixed CSS height: the canvas's pixel size is set from it on every redraw */
 .chart-wrap { position: relative; width: 100%; }
+.trigger-highlight { position: absolute; pointer-events: none; overflow: hidden; }
+.trigger-highlight > div {
+  position: absolute;
+  inset-block: 0;
+  border: 2px solid var(--chart-accent);
+  opacity: 0;
+}
 #chart { width: 100%; height: 158px; display: block; background: var(--panel); }
 .evidence-controls { margin-top: 12px; }
 #evidence-row { display: block; width: min(100%, 30rem); margin: 4px 0; accent-color: var(--accent); }

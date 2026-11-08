@@ -7,7 +7,7 @@ export type Selection = { id: string; rows: Row[]; opener: HTMLElement; disclosu
 const emptyFilters = { search: "", attack: "", state: "", report: "" };
 
 function IncidentDetail({ incident: i, selection, evidence }: {
-  incident: Incident; selection: Selection; evidence: (ids: Set<string>, matching: number[], index?: number) => void;
+  incident: Incident; selection: Selection; evidence: (ids: Set<string>, matching: number[], animate: boolean, index?: number) => void;
 }) {
   const triggerIds = new Set(i.trigger_entry_ids ?? []);
   const matching = selection.rows.flatMap((row, index) => triggerIds.has(row.entry_id) ? [index] : []);
@@ -30,11 +30,11 @@ function IncidentDetail({ incident: i, selection, evidence }: {
         </dl><p className="hint">{confidenceNote}</p>
       </section>
       <section><div className="evidence-heading"><h4>Trigger evidence</h4>
-        {!!matching.length && <button className="btn" type="button" id="view-trigger-rows" onClick={() => evidence(triggerIds, matching)}>View trigger rows</button>}
+        {!!matching.length && <button className="btn" type="button" id="view-trigger-rows" onClick={event => evidence(triggerIds, matching, event.detail > 0)}>View trigger rows</button>}
         </div><p className="hint">{triggerIds.size ? `${matching.length} of ${triggerIds.size} trigger rows available in the replay buffer.` : "No trigger rows recorded for this incident."}{matching.length > 3 && " Showing the first 3 below."}</p>
         {!!matching.length && <ul className="evidence-rows">{matching.slice(0, 3).map(index => {
           const row = selection.rows[index];
-          return <li key={row.entry_id}><button className="evidence-row" type="button" data-trigger-row={index} onClick={() => evidence(triggerIds, matching, index)}>
+          return <li key={row.entry_id}><button className="evidence-row" type="button" data-trigger-row={index} onClick={event => evidence(triggerIds, matching, event.detail > 0, index)}>
             <span><strong>{row.predicted_class}</strong><small>{row.entry_id} · {fmtTime(row.ts)}</small></span>
             <span><strong>{row.confidence.toFixed(3)}</strong><small>Confidence</small></span><span aria-hidden="true">↗</span>
           </button></li>;
@@ -97,11 +97,11 @@ export const Incidents = memo(function Incidents({ hidden, incidents, classes, l
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
   }, [hidden, selection, close]);
-  function showEvidence(triggerIds: Set<string>, matching: number[], index?: number) {
+  function showEvidence(triggerIds: Set<string>, matching: number[], animate: boolean, index?: number) {
     if (!selection) return;
     const disclosures = Array.from(body.current?.querySelectorAll("details[open] > summary") ?? [], node => node.textContent ?? "");
     snapshot({ rows: selection.rows, selected: index ?? matching[0], first: matching[0], last: matching.at(-1),
-      triggerIds, selection, disclosures, returnRow: index });
+      triggerIds, selection, disclosures, returnRow: index, animate });
   }
   return (<section id="incidents-view" aria-labelledby="show-incidents" hidden={hidden} className={selection ? "has-detail" : undefined}>
   <section id="card-incidents" aria-labelledby="incidents-heading">

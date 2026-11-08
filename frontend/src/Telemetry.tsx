@@ -4,8 +4,37 @@ import { ClassLabel, Fact, classColor, colorTokens, datasetName, focus, fmtTime,
 import type { Selection } from "./Incidents";
 
 export type Snapshot = { rows: Row[]; selected: number; triggerIds: Set<string>; first?: number; last?: number;
-  selection?: Selection; openerId?: string; returnRow?: number; disclosures?: string[] };
+  selection?: Selection; openerId?: string; returnRow?: number; disclosures?: string[]; animate?: boolean };
 const chartPad = { l: 34, r: 10, t: 10, b: 20 };
+
+function TriggerHighlight({ snapshot, hidden }: { snapshot?: Snapshot; hidden: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const selection = snapshot?.selection;
+  const animate = snapshot?.animate;
+  useLayoutEffect(() => {
+    const band = ref.current;
+    if (!band || !animate || !selection || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const style = getComputedStyle(band);
+    const timing = style.getPropertyValue("--duration-enter").trim();
+    const duration = parseFloat(timing) * (timing.endsWith("ms") ? 1 : 1000);
+    const animation = band.animate([{ opacity: 0.85 }, { opacity: 0 }], {
+      duration,
+      easing: style.getPropertyValue("--ease-out").trim(),
+    });
+    return () => animation.cancel();
+  }, [selection, animate]);
+  useLayoutEffect(() => {
+    if (hidden) ref.current?.getAnimations().forEach(animation => animation.cancel());
+  }, [hidden]);
+  if (!animate || snapshot.first == null || snapshot.last == null) return null;
+  const slots = Math.max(1, snapshot.rows.length - 1);
+  return <div aria-hidden="true" className="trigger-highlight" style={{
+    inset: `${chartPad.t}px ${chartPad.r}px ${chartPad.b}px ${chartPad.l}px`,
+  }}><div ref={ref} style={{
+    left: `calc(${100 * snapshot.first / slots}% - 5px)`,
+    right: `calc(${100 * (slots - snapshot.last) / slots}% - 5px)`,
+  }} /></div>;
+}
 const liveRowLimit = 300;
 const shortClass: Record<string, string> = { "Storage Exhaustion": "Storage", "Command Flooding": "Flooding",
   "Data Injection": "Injection", "Defence Impairment": "Defence" };
@@ -177,6 +206,7 @@ export function Telemetry({ hidden, recent, snapshot, setSnapshot, stats, stale,
       <div className="legend" id="legend">{classes.map(name => <span key={name} title={name}><i style={{background: `var(${classColor(name)})`}} /><span aria-hidden="true">{shortClass[name] ?? name}</span><span className="sr-only">{name}</span></span>)}</div>
       <div className="chart-wrap" id="chart-wrap">
         <Chart rows={rows} snapshot={snapshot} hidden={hidden} theme={theme} threshold={guards.min_confidence} />
+        <TriggerHighlight snapshot={snapshot} hidden={hidden} />
       </div>
       <details className="chart-guide"><summary>How to read this chart</summary>
         <p className="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span className="g-conf">{guards.min_confidence}</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
@@ -214,7 +244,10 @@ export function Telemetry({ hidden, recent, snapshot, setSnapshot, stats, stale,
   <section className="card" id="card-feed">
     <div className="card-head"><div><p className="dashboard-label">Evidence history</p><h2 id="feed-heading" tabIndex={-1}>{snapshot ? "Snapshot telemetry rows" : "Recent telemetry rows"}</h2></div><span className="hint">Select a row to inspect</span></div>
     <p className="hint" id="feed-held" role="status" hidden={!held}>Rows are held while you navigate the feed. Replay continues in the background.</p>
-    <ul id="feed" className="telemetry-rows" onFocus={() => setHeld(rows)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHeld(null); }}>{feed.length ? feed.map(row => <FeedRow key={row.entry_id} row={row} selected={selectedRow?.entry_id === row.entry_id} trigger={!!snapshot?.triggerIds.has(row.entry_id)} onClick={() => inspect(row)} />) : <li className="hint">Waiting for scored telemetry.</li>}</ul>
+    <ul id="feed" className="telemetry-rows"
+      onFocus={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHeld(rows); }}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHeld(null); }}
+    >{feed.length ? feed.map(row => <FeedRow key={row.entry_id} row={row} selected={selectedRow?.entry_id === row.entry_id} trigger={!!snapshot?.triggerIds.has(row.entry_id)} onClick={() => inspect(row)} />) : <li className="hint">Waiting for scored telemetry.</li>}</ul>
   </section>
   <details className="pipeline-details">
     <summary>Pipeline health</summary>
