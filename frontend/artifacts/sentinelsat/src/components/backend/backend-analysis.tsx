@@ -6,6 +6,7 @@ import { useBackend } from '@/lib/backend/context';
 import type { ManualAction, ManualReplay, PacketResult, ReplaySettings, WindowResult } from '@/lib/backend/protocol';
 import { fmtConf } from '@/lib/sentinel/format';
 import { ConnectRequired, Label, errMsg, inputCls, selectCls, usePersisted } from './shared';
+import { useOperation } from '@/lib/sentinel/operations';
 
 const PACKET = ['MsgLength', 'CmdCode', 'TimeRadians', 'ApId', 'MsgId'] as const;
 
@@ -17,9 +18,11 @@ function ReplayWorkspace() {
   const [busy, setBusy] = useState<ManualAction | null>(null);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tick, setTick] = useState(0);
+  const controlOperation = useOperation<{ action: ManualAction; replay: ManualReplay }>(`sentinelsat.backend.${client?.base ?? 'none'}.replay-control.v2`);
+  const controlPending = controlOperation.status === 'pending';
 
   useEffect(() => {
-    if (!client) return;
+    if (!client || controlPending) return;
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -34,7 +37,7 @@ function ReplayWorkspace() {
     };
     void poll();
     return () => { ctrl.abort(); clearTimeout(timer); };
-  }, [client, cfg.interval, cfg.polling, tick]);
+  }, [client, cfg.interval, cfg.polling, tick, controlPending]);
 
   if (!client) return null;
   const speed = Number(cfg.speed);
@@ -45,16 +48,14 @@ function ReplayWorkspace() {
   const control = async (action: ManualAction) => {
     setBusy(action);
     setActionMsg(null);
-    try {
+    await controlOperation.run(async () => {
       await client.manualControl(action, settings);
       const r = await client.manualReplay();
       setReplay(r);
       setActionMsg({ ok: true, text: `${action} acknowledged. Backend now reports: ${r.state}, ${r.rows_emitted.toLocaleString()} rows emitted${action === 'stop' ? ' (stop does not necessarily reset counts)' : ''}.` });
-    } catch (e) {
-      setActionMsg({ ok: false, text: errMsg(e, `${action} failed.`) });
-    } finally {
-      setBusy(null);
-    }
+      return { action, replay: r };
+    });
+    setBusy(null);
   };
 
   const rows = replay?.rows ?? [];
@@ -65,7 +66,7 @@ function ReplayWorkspace() {
   rows.forEach((r) => r.Label != null && labels.set(r.Label, (labels.get(r.Label) ?? 0) + 1));
   const st = replay?.state;
   const B = (a: ManualAction, label: string, Icon: typeof Play, disabled: boolean, variant: 'primary' | 'secondary' | 'ghost' = 'secondary') => (
-    <Btn variant={variant} size="sm" disabled={!!busy || disabled} onClick={() => void control(a)} data-testid={`button-replay-${a}`}>
+    <Btn variant={variant} size="sm" disabled={controlPending || disabled} onClick={() => void control(a)} data-testid={`button-replay-${a}`}>
       {busy === a ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Icon className="size-3.5" aria-hidden />} {label}
     </Btn>
   );
@@ -93,11 +94,13 @@ function ReplayWorkspace() {
             {B('start', 'Start', Play, !valid || !replay || st === 'running' || st === 'paused', 'primary')}
             {B('pause', 'Pause', Pause, st !== 'running')}
             {B('resume', 'Resume', Play, st !== 'paused')}
-            {B('stop', 'Stop / reset', Square, !replay || st === 'stopped')}
+            {B('stop', 'Stop', Square, !replay || st === 'stopped')}
             {B('configure', 'Apply settings', RotateCcw, !valid)}
             {!cfg.polling && <Btn size="sm" variant="ghost" onClick={() => setTick((t) => t + 1)} data-testid="button-replay-refresh">Refresh now</Btn>}
           </div>
           {actionMsg && (actionMsg.ok ? <p role="status" className="text-[12.5px] text-mint">{actionMsg.text}</p> : <ErrorNote>{actionMsg.text}</ErrorNote>)}
+          {controlPending && <p role="status" className="text-[12px] text-ink-3">Waiting for the backend to confirm the replay action…</p>}
+          {controlOperation.error && <ErrorNote>{controlOperation.error}</ErrorNote>}
           {pollErr && <ErrorNote>{pollErr}</ErrorNote>}
           {replay && (
             <dl data-testid="panel-replay-facts">
@@ -150,14 +153,13 @@ function ReplayWorkspace() {
 
 function WindowAnalysis({ replay }: { replay: ManualReplay | null }) {
   const { client } = useBackend();
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [result, setResult] = useState<WindowResult | null>(null);
+  const operation = useOperation<WindowResult>(`sentinelsat.backend.${client?.base ?? 'none'}.window-operation.v2`);
+  const busy = operation.status === 'pending';
+  const err = operation.error;
+  const result = operation.result;
   if (!client) return null;
   const run = async () => {
-    setBusy(true);
-    setErr('');
-    try { setResult(await client.analyzeWindow()); } catch (e) { setErr(errMsg(e, 'Window analysis failed.')); } finally { setBusy(false); }
+    await operation.run(() => client.analyzeWindow());
   };
   return (
     <Panel>
@@ -196,17 +198,16 @@ function WindowAnalysis({ replay }: { replay: ManualReplay | null }) {
 function PacketTest() {
   const { client } = useBackend();
   const [vals, setVals] = usePersisted('packet', { MsgLength: '128', CmdCode: '4', TimeRadians: '1.57', ApId: '102', MsgId: '50' } as Record<string, string>);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [res, setRes] = useState<{ input: Record<string, number>; out: PacketResult } | null>(null);
+  const operation = useOperation<{ input: Record<string, number>; out: PacketResult }>(`sentinelsat.backend.${client?.base ?? 'none'}.packet-operation.v2`);
+  const busy = operation.status === 'pending';
+  const err = operation.error;
+  const res = operation.result;
   if (!client) return null;
   const bad = PACKET.filter((k) => !String(vals[k] ?? '').trim() || !Number.isFinite(Number(vals[k])));
   const score = async () => {
     if (bad.length) return;
     const input = Object.fromEntries(PACKET.map((k) => [k, Number(vals[k])]));
-    setBusy(true);
-    setErr('');
-    try { setRes({ input, out: await client.scorePacket(input) }); } catch (e) { setErr(`Packet model unavailable or failed: ${errMsg(e, 'scoring failed.')}`); } finally { setBusy(false); }
+    await operation.run(async () => ({ input, out: await client.scorePacket(input) }));
   };
   return (
     <Panel>
@@ -227,6 +228,7 @@ function PacketTest() {
         {err && <ErrorNote>{err}</ErrorNote>}
         {res && (
           <dl data-testid="panel-packet-result">
+            {PACKET.some(key => Number(vals[key]) !== res.input[key]) && <p role="status" className="mb-3 text-[12px] text-amber">Previous result. Current inputs differ from the submitted packet below.</p>}
             <Field k="Status">{res.out.status}</Field>
             <Field k="Prediction class">{res.out.prediction_class} · {res.out.is_anomaly ? <span className="text-rose">anomaly</span> : 'not anomalous'}</Field>
             <Field k="Confidence">{fmtConf(res.out.confidence_score)}</Field>

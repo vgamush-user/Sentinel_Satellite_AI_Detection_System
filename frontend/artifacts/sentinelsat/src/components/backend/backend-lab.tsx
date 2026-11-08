@@ -7,7 +7,9 @@ import type { BackendClient } from '@/lib/backend/client';
 import type { BackendDecision, BackendIncident, BackendRow, BackendSample } from '@/lib/backend/protocol';
 import { customEntryCountSchema } from '@/lib/backend/protocol';
 import { fmtConf } from '@/lib/sentinel/format';
-import { ConnectRequired, Label, errMsg, patchStored, inputCls, isNormal, selectCls, usePersisted } from './shared';
+import { reportStatus } from '@/lib/backend/report-status';
+import { useOperation } from '@/lib/sentinel/operations';
+import { ConnectRequired, Label, errMsg, inputCls, isNormal, selectCls, usePersisted } from './shared';
 
 type Quality = 'clean' | 'noisy';
 interface Run {
@@ -15,7 +17,9 @@ interface Run {
   label: string;
   kind: 'entry' | 'simulation';
   trueClass: string | null;
+  input?: unknown;
   error?: string;
+  outcomeUnknown?: boolean;
   ids?: string[];
   rows: Record<string, BackendRow>;
   decisions: Record<string, BackendDecision>;
@@ -59,14 +63,15 @@ function RunTrace({ run, incidents }: { run: Run; incidents: BackendIncident[] }
   const decision = lastId ? run.decisions[lastId] : undefined;
   const inc = runIncident(run, incidents);
   const rs = inc?.report_status ?? null;
-  const reportState = !inc ? (decided ? 'no' : 'wait') : rs === 'ready' || inc.report ? 'done' : rs === 'error' || rs === 'failed' ? 'err' : rs ? 'run' : 'wait';
+  const normalizedReport = reportStatus(rs, inc?.report);
+  const reportState = !inc ? (decided ? 'no' : 'wait') : normalizedReport === 'ready' ? 'done' : normalizedReport === 'failed' ? 'err' : normalizedReport === 'pending' ? 'run' : 'wait';
   const counts = new Map<string, number>();
   rows.forEach((r) => counts.set(r.predicted_class, (counts.get(r.predicted_class) ?? 0) + 1));
   const mean = scored ? rows.reduce((a, r) => a + r.confidence, 0) / scored : null;
   return (
     <div className="space-y-4">
       <ol className="space-y-3">
-        <Step state={run.error ? 'err' : run.ids ? 'done' : 'run'} title={run.error ? 'Submission failed' : 'Submitted'}>
+        <Step state={run.outcomeUnknown ? 'wait' : run.error ? 'err' : run.ids ? 'done' : 'run'} title={run.outcomeUnknown ? 'Submission outcome unknown' : run.error ? 'Submission failed' : 'Submitted'}>
           {run.error ? run.error : run.ids ? `${n} ${n === 1 ? 'entry' : 'entries'} accepted by the backend. Acceptance is not detection.` : 'Sending to backend…'}
         </Step>
         <Step state={!run.ids ? 'wait' : scored < n ? 'run' : 'done'} title="Scored">
@@ -93,7 +98,7 @@ function RunTrace({ run, incidents }: { run: Run; incidents: BackendIncident[] }
           )}
         </Step>
         <Step state={reportState as 'done'} title="Report">
-          {inc ? (rs ? `Report ${rs}${inc.report_mode ? ` · ${inc.report_mode}` : ''}` : 'No report activity yet') : decided ? 'No incident, so no report for this run.' : ''}
+          {inc ? (normalizedReport === 'unknown' ? `Completion status unknown${rs ? ` (${rs})` : ''}. ${inc.report ? 'Supplied report text is available on the incident.' : ''}` : rs ? `Report ${rs}${inc.report_mode ? ` · ${inc.report_mode}` : ''}` : 'No report activity yet') : decided ? 'No incident, so no report for this run.' : ''}
         </Step>
       </ol>
       {scored > 0 && (
@@ -135,7 +140,7 @@ function RunTrace({ run, incidents }: { run: Run; incidents: BackendIncident[] }
           </table>
         </div>
       )}
-      <RawBlock title="Submission record" data={{ label: run.label, entry_ids: run.ids ?? null, true_class: run.trueClass, error: run.error ?? null }} />
+      <RawBlock title="Submission record" data={{ label: run.label, submitted_input: run.input ?? 'Not retained for this older run', entry_ids: run.ids ?? null, true_class: run.trueClass, error: run.error ?? null }} />
     </div>
   );
 }
@@ -157,14 +162,15 @@ export function BackendLab() {
     setEditor((e) => ({ ...e, values: typeof fn === 'function' ? fn(e.values) : fn }));
   const [invalid, setInvalid] = useState<string[]>([]);
   const [loadState, setLoadState] = useState<{ busy: boolean; msg: string; error?: boolean }>({ busy: false, msg: '' });
-  const [pending, setPending] = useState(false);
-  const [runStore, setRunStore, runKey] = usePersisted('lab-runs', { runs: [] as Run[], shown: null as string | null });
+  const submission = useOperation<void>(`sentinelsat.backend.${client?.base ?? 'none'}.submission.v2`);
+  const pending = submission.status === 'pending';
+  const [runStore, setRunStore] = usePersisted('lab-runs', { runs: [] as Run[], shown: null as string | null }, saved => ({ ...saved,
+    runs: Array.isArray(saved.runs) ? saved.runs.slice(0, 8).map(run => !run.ids && !run.error ? { ...run, outcomeUnknown: true, error: 'Submission outcome unknown after reload. No request was retried.' } : run) : [] }));
   const runs = runStore.runs;
   const shown = runStore.shown;
   const setRuns = (fn: (r: Run[]) => Run[]) => setRunStore((s) => { const next = fn(s.runs); return next === s.runs ? s : { ...s, runs: next }; });
   const setShown = (k: string | null) => setRunStore((s) => ({ ...s, shown: k }));
   const sampleReq = useRef<AbortController | null>(null);
-  const submitting = useRef(false);
 
   const cls = form.cls || classes.find((c) => !isNormal(c)) || classes[0] || '';
   const atkClasses = classes.filter((c) => !isNormal(c));
@@ -172,8 +178,7 @@ export function BackendLab() {
   const matches = !!loaded && loaded.cls === cls && loaded.quality === form.quality;
   const edited = loaded ? features.filter((f) => values[f] === '' || Number(values[f]) !== loaded.sample.features[f]) : [];
 
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; sampleReq.current?.abort(); }; }, []);
+  useEffect(() => () => { sampleReq.current?.abort(); }, []);
 
   // Track runs by returned entry IDs; retain rows/decisions even after buffer eviction.
   const recent = data?.recent;
@@ -233,27 +238,20 @@ export function BackendLab() {
     setForm((f) => ({ ...f, ...patch }));
   };
 
-  const submit = async (label: string, kind: Run['kind'], trueClass: string | null, call: () => ReturnType<BackendClient["send"]>) => {
-    if (submitting.current) return;
-    submitting.current = true;
-    setPending(true);
-    const key = `run-${Date.now()}`;
-    setRuns((r) => [{ key, label, kind, trueClass, rows: {}, decisions: {} }, ...r].slice(0, 8));
+  const submit = (label: string, kind: Run['kind'], trueClass: string | null, call: () => ReturnType<BackendClient["send"]>, input: unknown) => submission.run(async () => {
+    const key = `run-${crypto.randomUUID()}`;
+    setRuns((r) => [{ key, label, kind, trueClass, input, rows: {}, decisions: {} }, ...r].slice(0, 8));
     setShown(key);
     try {
       const res = await call();
       const fn = (r: Run[]) => r.map((x) => (x.key === key ? { ...x, ids: res.entry_ids } : x));
-      if (mounted.current) setRuns(fn);
-      else patchStored<{ runs: Run[] }>(runKey, (s) => ({ ...s, runs: fn(s.runs) }));
+      setRuns(fn);
     } catch (e) {
-      const fn = (r: Run[]) => r.map((x) => (x.key === key ? { ...x, error: errMsg(e, 'Submission failed.') } : x));
-      if (mounted.current) setRuns(fn);
-      else patchStored<{ runs: Run[] }>(runKey, (s) => ({ ...s, runs: fn(s.runs) }));
-    } finally {
-      submitting.current = false;
-      setPending(false);
+      const unknown = e instanceof TypeError || e instanceof DOMException && ['AbortError', 'TimeoutError'].includes(e.name);
+      const fn = (r: Run[]) => r.map((x) => (x.key === key ? { ...x, outcomeUnknown: unknown, error: unknown ? 'Completion could not be confirmed. Check telemetry before resubmitting; no request was retried.' : errMsg(e, 'Submission failed.') } : x));
+      setRuns(fn);
     }
-  };
+  });
 
   const count = Number(form.count);
   const countErr = form.burst && !customEntryCountSchema.safeParse(count).success ? 'Burst count must be a whole number from 1 to 50.' : '';
@@ -269,11 +267,13 @@ export function BackendLab() {
     const n = form.burst ? count : 1;
     const truth = edited.length ? null : loaded.sample.true_class;
     const label = `${form.burst ? `${n}x ` : ''}test entry${edited.length ? ` (${edited.length} edited)` : ''}`;
-    void submit(label, 'entry', truth, () => client.send({ features: Object.fromEntries(features.map((f) => [f, Number(values[f])])), count: n, true_class: truth, interval_sec: 0.1 }));
+    const input = { features: Object.fromEntries(features.map((f) => [f, Number(values[f])])), count: n, true_class: truth, interval_sec: 0.1 };
+    void submit(label, 'entry', truth, () => client.send(input), input);
   };
   const simulate = () => {
     if (atkErr || !atkCls) return;
-    void submit(`${atkCls} attack (${atkCount} ${form.atkQuality} rows)`, 'simulation', atkCls, () => client.attack({ cls: atkCls, count: atkCount, quality: form.atkQuality }));
+    const input = { cls: atkCls, count: atkCount, quality: form.atkQuality };
+    void submit(`${atkCls} attack (${atkCount} ${form.atkQuality} rows)`, 'simulation', atkCls, () => client.attack(input), input);
   };
 
   const run = runs.find((r) => r.key === shown) ?? runs[0];

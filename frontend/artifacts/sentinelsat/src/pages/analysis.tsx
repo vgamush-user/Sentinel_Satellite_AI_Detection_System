@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, ScanSearch, TriangleAlert } from 'lucide-react';
+import { ExternalLink, Loader2, ScanSearch, TriangleAlert } from 'lucide-react';
 import { Btn, ClassTag, CopyButton, Empty, ErrorNote, Field, PageHeader, Panel, PanelHead, RawBlock } from '@/components/kit';
 import { ReportProse } from '@/components/report-prose';
 import { cn } from '@/lib/utils';
@@ -8,53 +8,54 @@ import { useAdapter, useSentinel } from '@/lib/sentinel/store';
 import { useBackend } from '@/lib/backend/context';
 import { BackendAnalysis } from '@/components/backend/backend-analysis';
 import type { AnalysisResponse, ClassLabel, SampleInput } from '@/lib/sentinel/types';
+import { useDurableState, useOperation } from '@/lib/sentinel/operations';
+
+function HostedDemoLink() {
+  return (
+    <a
+      href="https://huggingface.co/spaces/Amuthavel2402/Sentinel_Satellite"
+      target="_blank"
+      rel="noopener"
+      className="inline-flex h-9 items-center gap-1.5 rounded-[9px] border border-divider-strong/70 bg-raised px-3.5 text-[13px] font-medium text-ink hover:border-info hover:bg-sky"
+    >
+      <ExternalLink className="size-4" aria-hidden="true" />
+      Analyze in hosted demo
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  );
+}
 
 const KEY = 'sentinelsat.analysis.v1';
 
 interface Saved {
   values: Record<string, string>;
   sample: { id: string; label: string; groundTruth: ClassLabel; readingId: string } | null;
-  result: { submitted: Record<string, number>; response: AnalysisResponse; sampleId?: string } | null;
-}
-
-function loadSaved(): Saved {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    /* ignore */
-  }
-  return { values: {}, sample: null, result: null };
+  result: { submitted: Record<string, number>; response: AnalysisResponse; sampleId?: string; groundTruth?: ClassLabel } | null;
 }
 
 export default function Analysis() {
   const s = useSentinel();
   const adapter = useAdapter();
   const features = s.config?.features ?? [];
-  const [saved] = useState(loadSaved);
-  const [values, setValues] = useState<Record<string, string>>(saved.values);
-  const [sample, setSample] = useState(saved.sample);
-  const [result, setResult] = useState(saved.result);
+  const [saved, setSaved] = useDurableState<Saved>(KEY, { values: {}, sample: null, result: null });
+  const values = saved.values;
+  const sample = saved.sample;
+  const setValues = (next: Record<string, string> | ((v: Record<string, string>) => Record<string, string>)) => setSaved(p => ({ ...p, values: typeof next === 'function' ? next(p.values) : next }));
+  const setSample = (next: Saved['sample'] | ((v: Saved['sample']) => Saved['sample'])) => setSaved(p => ({ ...p, sample: typeof next === 'function' ? next(p.sample) : next }));
+  const operation = useOperation<NonNullable<Saved['result']>>('sentinelsat.analysis.operation.v2');
+  const result = operation.result ?? saved.result;
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'failed'>('idle');
-  const [failMsg, setFailMsg] = useState<string | null>(null);
+  const status = operation.status === 'pending' ? 'submitting' : operation.status;
+  const failMsg = operation.error;
   const [samples, setSamples] = useState<SampleInput[]>([]);
 
   useEffect(() => {
     adapter.getSamples().then(setSamples);
   }, [adapter]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ values, sample, result } satisfies Saved));
-    } catch {
-      /* ignore */
-    }
-  }, [values, sample, result]);
-
   const stale = useMemo(() => {
     if (!result) return false;
-    return features.some((f) => String(result.submitted[f.key]) !== (values[f.key] ?? '').trim());
+    return features.some((f) => !(values[f.key] ?? '').trim() || Number(values[f.key]) !== result.submitted[f.key]);
   }, [result, values, features]);
 
   const validate = (key: string, v: string | undefined) => {
@@ -75,7 +76,7 @@ export default function Analysis() {
     const sm = samples.find((x) => x.id === id);
     if (!sm) return;
     const v: Record<string, string> = {};
-    for (const f of features) v[f.key] = sm.features[f.key] == null ? '' : String(sm.features[f.key]);
+    for (const [key, value] of Object.entries(sm.features)) v[key] = value == null ? '' : String(value);
     setValues(v);
     setErrors({});
     setSample({ id: sm.id, label: sm.label, groundTruth: sm.groundTruth, readingId: sm.readingId });
@@ -94,33 +95,32 @@ export default function Analysis() {
     }
     const submitted: Record<string, number> = {};
     for (const f of features) submitted[f.key] = Number(values[f.key].trim());
-    setStatus('submitting');
-    setFailMsg(null);
-    try {
+    await operation.run(async () => {
       const response = await adapter.runAnalysis({ features: submitted, sampleId: sample?.id });
-      setResult({ submitted, response, sampleId: sample?.label.endsWith('(edited)') ? undefined : sample?.id });
-      setStatus('idle');
-    } catch (e) {
-      setStatus('failed');
-      setFailMsg(e instanceof Error ? e.message : 'Analysis request failed. Your inputs are unchanged.');
-    }
+      const unedited = sample && !sample.label.endsWith('(edited)');
+      return { submitted, response, sampleId: unedited ? sample.id : undefined, groundTruth: unedited ? sample.groundTruth : undefined };
+    });
   };
 
   const { client } = useBackend();
   if (client)
     return (
-      <div className="animate-in fade-in-0 duration-150">
-        <PageHeader title="Manual analysis" subtitle="Backend manual replay, full-window agent analysis, five-feature packet scoring and cached examples. Separate from the live stream." />
+      <div>
+        <PageHeader title="Manual analysis" subtitle="Backend manual replay, full-window agent analysis, five-feature packet scoring and cached examples. Separate from the live stream.">
+          <HostedDemoLink />
+        </PageHeader>
         <BackendAnalysis />
       </div>
     );
 
   const resp = result?.response;
-  const truth = result?.sampleId && sample && sample.id === result.sampleId ? sample.groundTruth : null;
+  const truth = result?.groundTruth ?? null;
 
   return (
-    <div className="animate-in fade-in-0 duration-150">
-      <PageHeader title="Manual analysis" subtitle="Run one reading through the classifier. Results are not written to the incident store." />
+    <div>
+      <PageHeader title="Manual analysis" subtitle="Run one reading through the classifier. Results are not written to the incident store.">
+        <HostedDemoLink />
+      </PageHeader>
       <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Panel className="self-start">
           <PanelHead title="Input reading" meta={sample ? <>Loaded: {sample.label} · source <span className="font-mono">{sample.readingId}</span></> : 'Enter values or load a labeled sample'}>
@@ -131,7 +131,7 @@ export default function Analysis() {
                 onChange={(e) => loadSample(e.target.value)}
                 className="h-8 rounded-[9px] border border-divider-strong bg-raised px-2 text-[12.5px] text-ink"
                 data-testid="select-sample"
-                disabled={!samples.length}
+                disabled={!samples.length || !features.length}
               >
                 <option value="" disabled>
                   Load sample…
@@ -206,7 +206,7 @@ export default function Analysis() {
                 Clear inputs
               </Btn>
             </div>
-            {status === 'failed' && failMsg && (
+            {(status === 'failed' || status === 'unknown') && failMsg && (
               <div className="mt-3">
                 <ErrorNote>{failMsg}</ErrorNote>
               </div>
@@ -222,7 +222,7 @@ export default function Analysis() {
           {!resp ? (
             <Empty icon={ScanSearch} title="Run analysis to see a result" body="Load a labeled sample, adjust any feature, then run. The result stays tied to the exact values submitted." />
           ) : (
-            <div className={cn('px-5 py-4 transition-opacity duration-150', stale && 'opacity-70')} data-testid="panel-result">
+            <div className="px-5 py-4" data-testid="panel-result">
               {stale && (
                 <div role="status" className="mb-4 flex items-start gap-2 rounded-[8px] border border-amber/30 bg-amber/[0.07] px-3 py-2 text-[12.5px] text-amber" data-testid="status-previous-result">
                   <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -270,7 +270,7 @@ export default function Analysis() {
                 {Object.entries(result!.submitted).map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-2 font-mono text-[11.5px]">
                     <span className="text-ink-3">{k}</span>
-                    <span className={cn('tnum', String(v) !== (values[k] ?? '').trim() ? 'text-amber' : 'text-ink')}>{v}</span>
+                    <span className={cn('tnum', !(values[k] ?? '').trim() || Number(values[k]) !== v ? 'text-amber' : 'text-ink')}>{v}</span>
                   </div>
                 ))}
               </div>

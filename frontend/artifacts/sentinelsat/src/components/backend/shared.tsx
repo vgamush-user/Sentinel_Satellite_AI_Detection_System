@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { PlugZap } from 'lucide-react';
 import { Empty } from '@/components/kit';
 import { useBackend } from '@/lib/backend/context';
+import { useDurableState } from '@/lib/sentinel/operations';
 
 export const inputCls = (bad?: boolean) =>
   `mt-1.5 h-9 w-full rounded-[9px] border bg-raised px-3 tnum text-[13px] text-ink ${bad ? 'border-rose bg-blush' : 'border-divider-strong focus-visible:border-lav'}`;
@@ -11,25 +12,10 @@ export const errMsg = (e: unknown, fallback: string) => (e instanceof Error && e
 export const isNormal = (c: string | null | undefined) => !!c && (c === 'nominal' || c.toLowerCase() === 'normal');
 
 /** Persist non-secret form values per backend identity (base URL). */
-export function usePersisted<T>(name: string, initial: T): [T, (v: T | ((p: T) => T)) => void, string] {
+export function usePersisted<T>(name: string, initial: T, migrate?: (saved: T) => T): [T, (v: T | ((p: T) => T)) => void, string] {
   const { client } = useBackend();
   const key = `sentinelsat.backend.${client?.base ?? 'none'}.${name}`;
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) return { ...initial, ...JSON.parse(raw) };
-    } catch {
-      /* ignore */
-    }
-    return initial;
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      /* ignore */
-    }
-  }, [key, value]);
+  const [value, setValue] = useDurableState<T>(key, initial, saved => migrate ? migrate({ ...initial, ...saved }) : ({ ...initial, ...saved }));
   return [value, setValue, key];
 }
 
