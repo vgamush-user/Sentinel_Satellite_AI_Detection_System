@@ -218,10 +218,10 @@ export function ThreatLab({ hidden, config, recent, decisions, incidents, notify
     void submit("/api/attack", { cls, count, quality }, `${cls} attack (${count} ${quality} rows)`, cls, "Simulation failed: ", "show-simulation");
   }
   return <><section className="grid wide-workspace" id="lab-view" aria-labelledby="show-lab" hidden={hidden}>
-  <section className="card lab-modes" aria-label="Threat Lab workflows">
-    <div><div><p className="dashboard-label">01 · Labeled samples</p><h2>Simulate a scenario</h2><p>Send a burst of attack samples through the replay pipeline.</p></div>
+  <section className="lab-modes" aria-label="Threat Lab workflows">
+    <div className="card"><div><p className="dashboard-label">01 · Labeled samples</p><h2>Simulate a scenario</h2><p>Send a burst of attack samples through the replay pipeline.</p></div>
       <button className="btn primary" id="show-simulation" disabled={!config || pending} onClick={() => dialog.current?.showModal()} type="button">Run simulation</button></div>
-    <div><div><p className="dashboard-label">02 · Custom input</p><h2>Test a telemetry entry</h2><p>Load a dataset row, edit features if needed, then send it once or as a burst.</p></div>
+    <div className="card" data-selected={editor}><div><p className="dashboard-label">02 · Custom input</p><h2>Test a telemetry entry</h2><p>Load a dataset row, edit features if needed, then send it once or as a burst.</p></div>
       <button className="btn" type="button" id="show-entry-editor" aria-controls="card-test" aria-expanded={editor} onClick={() => { setEditor(!editor); if (!editor) focus("entry-heading"); }}>{editor ? "Hide entry editor" : "Open entry editor"}</button></div>
   </section>
   <section className="card lab-ready" id="lab-ready" hidden={editor}>

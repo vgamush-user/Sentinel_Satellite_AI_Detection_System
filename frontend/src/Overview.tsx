@@ -90,8 +90,8 @@ export function Overview({ hidden, stats, stale, error, openTelemetry }: {
       </ol>
       <p id="scenario-status" role="status" className="console-source">{status}</p>
     </section>
-    <div className="card" id="scenario-result" tabIndex={-1} hidden={!result}>{result && <Walkthrough key={result.name} {...result} />}</div>
   </div>
+  <div className="card" id="scenario-result" tabIndex={-1} hidden={!result}>{result && <Walkthrough key={result.name} {...result} />}</div>
 </section>);
 }
 export const Method = memo(function Method({ hidden }: { hidden: boolean }) {
@@ -102,7 +102,7 @@ export const Method = memo(function Method({ hidden }: { hidden: boolean }) {
     <p>Both workflows use simulated CubeSat telemetry. They differ in when analysis starts and what evidence they return.</p>
     <table className="research-table">
       <caption className="sr-only">Comparison of SentinelSat workflows</caption>
-      <thead><tr><th scope="col">Stage</th><th scope="col">Web workspace</th><th scope="col">Analysis demo</th></tr></thead>
+      <thead><tr><th scope="col">Stage</th><th scope="col">Kafka telemetry</th><th scope="col">Manual analysis</th></tr></thead>
       <tbody>
         <tr><th scope="row">Input</th><td>Replay or injected test rows</td><td>Latest replay window at submission</td></tr>
         <tr><th scope="row">Trigger</th><td>Incident guards for confidence and row count</td><td>Statistical screening, then full analysis on request</td></tr>
@@ -111,6 +111,7 @@ export const Method = memo(function Method({ hidden }: { hidden: boolean }) {
     </table>
   </section>
   <section className="card methodology">
+    <p className="dashboard-label">Agent pipeline</p>
     <h2>Manual analysis · Five-stage workflow</h2>
     <ol className="agent-trace">
       <li><strong>Monitor</strong><span>Statistical screening against the nominal baseline.</span></li>
@@ -122,10 +123,12 @@ export const Method = memo(function Method({ hidden }: { hidden: boolean }) {
     <p>The statistical Monitor checks the replayed window. A manual analysis can proceed after a Monitor decline.</p>
   </section>
   <section className="card methodology">
+    <p className="dashboard-label">Live detection</p>
     <h2>Web workspace · Kafka telemetry replay</h2>
     <p>The detector scores replay and test rows. The incident manager groups qualifying rows using the configured confidence and row-count guards. Reports may be generated for the incident sample or drawn from a cached example.</p>
   </section>
   <section className="card methodology">
+    <p className="dashboard-label">Evaluation and limitations</p>
     <h2>Reported model evaluation</h2>
     <div className="evaluation"><p><strong>68.9%</strong> Domain-shift accuracy</p><p><strong>0.697</strong> Macro F1</p></div>
     <p>Project report figures for training on clean simulated telemetry and evaluating on noised telemetry. The near-perfect clean in-domain result is a simulator ceiling and an unsuitable estimate of generalization. Replay session accuracy uses a different denominator.</p>

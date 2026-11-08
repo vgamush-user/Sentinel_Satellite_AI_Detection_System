@@ -66,8 +66,8 @@ function PacketTest() {
     catch (error) { setError((error as Error).message); }
     finally { setPending(false); }
   }
-  return <section className="card">
-    <h2>Five-feature packet test</h2>
+  return <section className="card analysis-packet">
+    <div className="card-head"><div><p className="dashboard-label">Separate model workflow</p><h2>Five-feature packet test</h2></div><span className="badge">Phase 4</span></div>
     <p className="hint">Scores an individual packet with the Phase 4 model. Requires the Phase 4 scaler and model files.</p>
     <form onSubmit={send} className="analysis-controls">
       {Object.entries(fields).map(([name, value]) => <label key={name}>{name}
@@ -143,10 +143,13 @@ export function ManualAnalysis({ hidden }: { hidden: boolean }) {
     Number.isInteger(buffer) && buffer >= 20 && buffer <= 500;
   return <section className="grid" id="analysis-view" aria-labelledby="show-analysis" hidden={hidden}>
     <section className="card">
-      <h2>Manual telemetry replay</h2>
+      <div className="card-head">
+        <div><p className="dashboard-label">01 · Replay setup</p><h2>Manual telemetry replay</h2></div>
+        <span className="badge" role="status">{replay ? `CSV replay · ${replay.state}` : "Loading replay…"}</span>
+      </div>
       <p className="hint">Controls operate on a shared CSV replay for manual analysis. The live Kafka stream has its own controls.</p>
       <div className="analysis-controls">
-        <label>Dataset <select value={dataset} onChange={event => setDataset(event.target.value === "raw" ? "raw" : "noised")}>
+        <label>Dataset to load <select value={dataset} onChange={event => setDataset(event.target.value === "raw" ? "raw" : "noised")}>
           <option value="noised">Noised telemetry</option><option value="raw">Raw simulated telemetry</option>
         </select></label>
         <button className="btn" disabled={busy || !validSettings} onClick={() => void control("load")}>Load dataset</button>
@@ -158,9 +161,9 @@ export function ManualAnalysis({ hidden }: { hidden: boolean }) {
         <label>Refresh interval <select value={interval} onChange={event => setIntervalMs(Number(event.target.value))}>
           <option value="500">0.5 seconds</option><option value="1000">1 second</option><option value="2000">2 seconds</option><option value="3000">3 seconds</option>
         </select></label>
-        <label><input type="checkbox" checked={loop} onChange={event => setLoop(event.target.checked)} /> Loop playback</label>
+        <label className="radio"><input type="checkbox" checked={loop} onChange={event => setLoop(event.target.checked)} /> Loop playback</label>
       </div>
-      <div className="analysis-controls">
+      <div className="analysis-controls analysis-playback">
         <button className="btn primary" disabled={busy || !validSettings || !replay || replay.state === "running" || replay.state === "paused"} onClick={() => void control("start")}>Start replay</button>
         <button className="btn" disabled={busy || replay?.state !== "running"} onClick={() => void control("pause")}>Pause</button>
         <button className="btn" disabled={busy || replay?.state !== "paused"} onClick={() => void control("resume")}>Resume</button>
@@ -168,9 +171,16 @@ export function ManualAnalysis({ hidden }: { hidden: boolean }) {
         <button className="btn" disabled={busy || !validSettings} onClick={() => void control("configure")}>Apply settings</button>
       </div>
       {!validSettings && <p className="hint">Enter 1–200 rows per second and a buffer of 20–500 rows.</p>}
-      <p role="status">{replay ? `${replay.dataset} · ${replay.state} · ${replay.rows_emitted.toLocaleString()} rows emitted · ${replay.speed} rows/s · ${replay.order}` : "Loading replay…"}</p>
+      {replay && <dl className="result-facts analysis-replay-facts">
+        <Fact label="Active dataset" value={replay.dataset === "raw" ? "Raw simulated telemetry" : "Noised telemetry"} />
+        <Fact label="Rows emitted" value={replay.rows_emitted.toLocaleString()} />
+        <Fact label="Playback rate" value={`${replay.speed} rows/s`} />
+        <Fact label="Playback order" value={replay.order} />
+      </dl>}
       {(replayError || actionError) && <p role="alert">{actionError || replayError}</p>}
     </section>
+    <section className="analysis-evidence" aria-labelledby="replay-evidence-heading">
+    <div className="analysis-section-heading"><p className="dashboard-label">02 · Replay evidence</p><h2 id="replay-evidence-heading">Rolling metrics</h2></div>
     <div className="analysis-metrics">
       <MetricChart rows={rows} metric={metricA} select={setMetricA} label="Chart 1 metric" />
       <MetricChart rows={rows} metric={metricB} select={setMetricB} label="Chart 2 metric" />
@@ -185,17 +195,18 @@ export function ManualAnalysis({ hidden }: { hidden: boolean }) {
         </div> : <p className="hint">No rows in the replay buffer.</p>}
       </details>
       <p>Dataset label mix <span className="hint">· Descriptive ground truth</span></p>
-      {labels.size ? <ul>{[...labels].sort(([a], [b]) => a - b).map(([label, count]) =>
-        <li key={label}>Label {label} · {count} rows</li>)}</ul> : <p className="hint">No dataset labels yet.</p>}
+      {labels.size ? <ul className="analysis-labels">{[...labels].sort(([a], [b]) => a - b).map(([label, count]) =>
+        <li className="badge" key={label}>Label {label} · {count} rows</li>)}</ul> : <p className="hint">No dataset labels yet.</p>}
     </section>
-    <section className="card">
-      <h2>Analyze the latest replay window</h2>
-      <p>Monitor: {monitor}</p>
+    </section>
+    <section className="card analysis-result">
+      <div className="card-head"><div><p className="dashboard-label">03 · Agent analysis</p><h2>Analyze the latest replay window</h2></div><span className="badge">CSV replay window</span></div>
+      <p className="analysis-monitor"><strong>Monitor</strong> {monitor}</p>
       <button className="btn primary" disabled={running || !rows.length || !replay?.live_available} onClick={() => void analyze()}>Run full agent analysis</button>
       {replay && !replay.live_available && <p className="hint">Live analysis requires live agent mode and a Groq key. Cached scenarios are available in Overview.</p>}
       <p role="status">{running ? "Analysis running. Any result below is from the previous run." : analysisError || (result ? "Analysis complete." : "")}</p>
       {result && <>
-        <h3>Live analysis · {result.dataset} replay row {result.row}</h3>
+        <div className="analysis-result-heading panel-console"><p className="console-label">Run result · Live analysis</p><h3>{result.dataset} replay row {result.row}</h3></div>
         <dl className="result-facts">
           <Fact label="Message ID" value={result.message_id} /><Fact label="Ground truth" value={result.label} />
           <Fact label="Prediction" value={result.prediction} /><Fact label="Confidence" value={pct(result.confidence)} />
