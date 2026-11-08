@@ -531,6 +531,9 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .scenario-option:has(:checked) { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
 .scenario-option input { accent-color: var(--accent); margin: 0; }
 #scenario-description { margin-bottom: var(--space-3); }
+.workflow-overview { grid-column: 1 / -1; }
+.replay-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.replay-notice p { margin: 0; }
 .mobile-freshness { display: none; }
 .telemetry-status.is-stale .replay-metric:not(:has(#pill-kafka)) { color: var(--muted); }
 .telemetry-status.is-stale .replay-metric:first-child > span::after { content: " · Last received"; }

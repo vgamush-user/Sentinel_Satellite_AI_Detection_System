@@ -75,7 +75,25 @@ function toast(message, type = "info") {
 // Boot
 // ------------------------------------------------------------------------- //
 async function boot() {
-  const st = await (await fetch("/api/state")).json();
+  const retry = $("retry-replay");
+  retry.disabled = true;
+  let st;
+  try {
+    const response = await fetch("/api/state");
+    if (!response.ok) throw new Error("Replay unavailable");
+    st = await response.json();
+    if (!st.config || !Array.isArray(st.recent) || !Array.isArray(st.incidents) || !st.stats) throw new Error("Replay state unavailable");
+  } catch (_) {
+    $("overview-session").textContent = "Replay status unavailable";
+    $("incidents").textContent = "Incidents could not be loaded.";
+    $("replay-notice-text").textContent = "Replay is unavailable. Cached samples can still be explored.";
+    $("replay-notice").hidden = false;
+    retry.disabled = false;
+    return;
+  }
+  $("replay-notice").hidden = true;
+  $("show-simulation").disabled = false;
+  $("t-load").disabled = false;
   S.config = st.config;
   S.recent = st.recent;
   st.incidents.reverse().forEach((i) => S.incidents.set(i.incident_id, i));
@@ -99,11 +117,16 @@ const scenarios = {
 const confidenceNote = "Model confidence is a score, not the probability that an event is malicious. A high score can still be wrong.";
 
 function setupOverview() {
+  const root = document.documentElement;
+  const applyTheme = (theme) => {
+    root.dataset.theme = theme;
+    $("theme-toggle").setAttribute("aria-pressed", String(theme === "dark"));
+  };
+  try { applyTheme(localStorage.getItem("sentinelsat-theme") === "dark" ? "dark" : "light"); } catch (_) { applyTheme("light"); }
   $("theme-toggle").addEventListener("click", () => {
-    const root = document.documentElement;
-    const dark = root.dataset.theme !== "dark";
-    root.dataset.theme = dark ? "dark" : "light";
-    $("theme-toggle").setAttribute("aria-pressed", String(dark));
+    const theme = root.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(theme);
+    try { localStorage.setItem("sentinelsat-theme", theme); } catch (_) { /* Theme still applies to this page. */ }
     drawChart();
   });
   Object.keys(workspaces).forEach((view) => {
@@ -1186,10 +1209,7 @@ function reportProgress(incident) {
 }
 
 setupOverview();
-boot().catch(() => {
-  $("overview-session").textContent = "Replay status unavailable. Reload to reconnect.";
-  $("incidents").textContent = "Incidents could not be loaded. Reload to try again.";
-  $("show-simulation").disabled = true;
-  $("t-send").disabled = true;
-  $("t-load").disabled = true;
-});
+$("show-simulation").disabled = true;
+$("t-load").disabled = true;
+$("retry-replay").addEventListener("click", boot);
+boot();

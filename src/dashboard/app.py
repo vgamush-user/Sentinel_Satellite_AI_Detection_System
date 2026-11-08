@@ -144,15 +144,28 @@ def result_summary(mode, dataset_label, prediction, confidence, status, evidence
     )
 
 
+def analysis_trace(monitor, result=None):
+    """Describe only the stage evidence available to the dashboard."""
+    pending = "Waiting for analysis output" if result is None else "Output unavailable"
+    outputs = result or {}
+    return "\n".join((
+        f"1. **Monitor** — {monitor.removeprefix('Monitor: ')}",
+        f"2. **Classifier** — {'Prediction returned' if outputs.get('classification') else pending}",
+        f"3. **SPARTA Analyst** — {'Context returned' if outputs.get('sparta_context') else pending}",
+        f"4. **Mitigation** — {'Policy explanation returned' if outputs.get('mitigation') else pending}",
+        f"5. **Incident Reporter** — {'Narrative returned' if outputs.get('report') and outputs.get('status') != 'ERROR' else pending}",
+    ))
+
+
 def do_run_agent_pipeline():
     """Analyze the latest replay row only on explicit request."""
     if not os.environ.get("GROQ_API_KEY"):
-        yield "Live analysis is unavailable on this server. Try a cached scenario in Overview.", gr.skip(), gr.skip(), gr.skip()
+        yield "Live analysis is unavailable on this server. Try a cached scenario in Overview.", gr.skip(), gr.skip(), gr.skip(), gr.skip()
         return
 
     snap = sim.snapshot()
     if snap.last_row is None:
-        yield "No telemetry window selected. Start playback in Telemetry first.", gr.skip(), gr.skip(), gr.skip()
+        yield "No telemetry window selected. Start playback in Telemetry first.", gr.skip(), gr.skip(), gr.skip(), gr.skip()
         return
 
     row = snap.last_row
@@ -162,7 +175,9 @@ def do_run_agent_pipeline():
     monitor = ("Monitor: escalation criteria met." if should_escalate(window)
                else "Monitor: did not escalate. Analysis requested manually.")
     window_note = f"Replay window selected at submission · message ID {int(window['MsgId'])}."
-    yield f"**Live analysis running**\n\n{window_note} {monitor}", gr.skip(), gr.skip(), gr.skip()
+    yield (f"**Live analysis running**\n\n{window_note} {monitor} "
+           "Any result shown below belongs to the previous run.",
+           gr.skip(), gr.skip(), gr.skip(), analysis_trace(monitor))
 
     try:
         result = run_pipeline_for_window(window)
@@ -172,7 +187,7 @@ def do_run_agent_pipeline():
             limited = any(term in diagnostic for term in ("rate limit", "rate_limit", "429"))
             reason = ("The analysis provider is temporarily rate-limited. Wait and try again."
                       if limited else "The analysis returned incomplete or invalid output. Try again or explore a cached scenario.")
-            yield f"**Analysis failed.** {reason} Your previous result is still available.\n\n{monitor}", gr.skip(), gr.skip(), gr.skip()
+            yield f"**Analysis failed.** {reason} Any previous result is kept below.\n\n{monitor}", gr.skip(), gr.skip(), gr.skip(), analysis_trace(monitor, result)
             return
         prediction, confidence = classification.predicted_class, classification.confidence
         policy = decide_mitigation(prediction, confidence)
@@ -188,10 +203,10 @@ def do_run_agent_pipeline():
             f"#### SPARTA threat context\n{result.get('sparta_context') or 'Unavailable'}\n\n"
             f"#### Policy explanation\n{result.get('mitigation') or 'Unavailable'}"
         )
-        yield "Analysis complete.", summary, policy_summary, narrative
+        yield "Analysis complete.", summary, policy_summary, narrative, analysis_trace(monitor, result)
     except Exception as exc:
         print(f"[dashboard] agent pipeline failed: {exc!r}")
-        yield "This analysis couldn’t finish. Your previous result is still available. Try again or explore a cached scenario.", gr.skip(), gr.skip(), gr.skip()
+        yield "This analysis couldn’t finish. Any previous result is kept below. Try again or explore a cached scenario.", gr.skip(), gr.skip(), gr.skip(), analysis_trace(monitor, {})
 
 
 def do_show_demo_example(class_name: str):
@@ -278,7 +293,13 @@ def poll(metric_a, metric_b):
     else:
         escalate_md = "Monitor: waiting for data..."
 
-    return status_md, table, plot_a, plot_b, label_df, escalate_md
+    controls = (
+        gr.update(interactive=state in {"STOPPED", "FINISHED"}),
+        gr.update(interactive=state == "RUNNING"),
+        gr.update(interactive=state == "PAUSED"),
+        gr.update(interactive=state != "STOPPED"),
+    )
+    return status_md, table, plot_a, plot_b, label_df, escalate_md, *controls
 
 
 DASHBOARD_THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="gray").set(
@@ -320,22 +341,20 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
             f"Loaded **{DEFAULT_DATASET}** — {sim.total_rows:,} rows, {len(sim.df.columns)} columns."
         )
 
-        with gr.Row():
-            speed = gr.Slider(1, 200, value=10, step=1, label="Speed (rows / sec)")
-            order_mode = gr.Radio(["Sequential", "Shuffled"], value="Sequential", label="Playback order")
-            loop = gr.Checkbox(value=True, label="Loop when finished")
-            buffer_size = gr.Slider(20, 500, value=100, step=10, label="Replay buffer size (rows)")
+        with gr.Accordion("Replay settings", open=False):
+            with gr.Row():
+                speed = gr.Slider(1, 200, value=10, step=1, label="Speed (rows / sec)")
+                order_mode = gr.Radio(["Sequential", "Shuffled"], value="Sequential", label="Playback order")
+                loop = gr.Checkbox(value=True, label="Loop when finished")
+                buffer_size = gr.Slider(20, 500, value=100, step=10, label="Replay buffer size (rows)")
 
         with gr.Row():
             start_btn = gr.Button("▶ Start", variant="primary")
-            pause_btn = gr.Button("⏸ Pause")
-            resume_btn = gr.Button("⏵ Resume")
-            stop_btn = gr.Button("⏹ Stop / Reset")
+            pause_btn = gr.Button("Pause", interactive=False)
+            resume_btn = gr.Button("Resume", interactive=False)
+            stop_btn = gr.Button("Stop / Reset", interactive=False)
 
         status = gr.Markdown("**State:** STOPPED")
-
-        gr.Markdown("### Recent replayed telemetry rows (most recent first)")
-        live_table = gr.Dataframe(headers=list(sim.df.columns), row_count=(20, "fixed"), wrap=True)
 
         gr.Markdown("### Rolling metrics")
         with gr.Row():
@@ -344,6 +363,9 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
         with gr.Row():
             plot_a = gr.LinePlot(label="Chart 1")
             plot_b = gr.LinePlot(label="Chart 2")
+
+        with gr.Accordion("Recent replayed telemetry rows", open=False):
+            live_table = gr.Dataframe(headers=list(sim.df.columns), row_count=(20, "fixed"), wrap=True)
 
         gr.Markdown("### Ground-truth label mix in current buffer (descriptive only, not a detection)")
         # y_lim starts the axis at 0: Vega otherwise zooms to [min, max] count,
@@ -356,9 +378,8 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
             "Live analysis uses the latest replay row at the time you submit. "
             "The Monitor screens the row automatically. The remaining four stages run only on request."
         )
-        gr.Markdown(
-            "1. Monitor\n2. Classifier\n3. SPARTA Analyst\n4. Mitigation\n5. Incident Reporter"
-        )
+        with gr.Accordion("Analysis stages", open=True):
+            trace = gr.Markdown(analysis_trace("Monitor: waiting for an analysis request."))
         escalation_indicator = gr.Markdown("Monitor: waiting for replay data.")
         analyze_btn = gr.Button("Run full agent analysis", variant="primary",
                                 interactive=bool(os.environ.get("GROQ_API_KEY")))
@@ -399,7 +420,7 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
     order_mode.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
     loop.change(do_apply_speed, inputs=[speed, order_mode, loop, buffer_size], outputs=[])
 
-    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_status, analysis_header, analysis_policy, analysis_report])
+    analyze_btn.click(do_run_agent_pipeline, inputs=[], outputs=[analysis_status, analysis_header, analysis_policy, analysis_report, trace])
     for btn, name in zip(demo_buttons, DEMO_CLASS_NAMES):
         btn.click(lambda n=name: do_show_demo_example(n), inputs=[], outputs=[demo_header, demo_policy, demo_report])
 
@@ -407,7 +428,8 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
     timer.tick(
         poll,
         inputs=[metric_a, metric_b],
-        outputs=[status, live_table, plot_a, plot_b, label_bar, escalation_indicator],
+        outputs=[status, live_table, plot_a, plot_b, label_bar, escalation_indicator,
+                 start_btn, pause_btn, resume_btn, stop_btn],
     )
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@
     <button class="btn ghost" id="theme-toggle" type="button" aria-pressed="false">Dark theme</button>
   </header>
   <main>
+    <div class="card replay-notice" id="replay-notice" hidden><p id="replay-notice-text" role="status"></p><button class="btn" id="retry-replay" type="button">Retry connection</button></div>
 <section class="grid intro-view" id="overview-view" aria-labelledby="show-overview">
   <div class="card intro">
     <div class="card-head"><h2 id="scenarios-heading">Start with a sample</h2><span class="badge">Cached examples · No key needed</span></div>
@@ -47,6 +48,10 @@
 </section>
 
 <section class="grid intro-view" id="method-view" aria-labelledby="show-method" hidden>
+  <section class="card methodology workflow-overview">
+    <h2>Two ways to explore SentinelSat</h2>
+    <dl class="result-facts"><div><dt>Web workspace</dt><dd>Replay or test rows → detector → incident when guards are met</dd></div><div><dt>Analysis demo</dt><dd>Replay window → Monitor → full analysis on request</dd></div></dl>
+  </section>
   <section class="card methodology">
     <h2>Hosted demo · Five-stage analysis</h2>
     <ol class="agent-trace">
