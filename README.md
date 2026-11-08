@@ -9,10 +9,10 @@ an incident report. A live website shows all of it as it happens.
 **Quick start (real-time system):** start Docker Desktop, then
 ```bash
 cd frontend
-npm ci
-npm run build
+npx pnpm@10.26.1 install --frozen-lockfile
+npx pnpm@10.26.1 run build
 cd ..
-python scripts/start_all.py --open
+python scripts/start_all.py --agents cached --open
 ```
 Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.
 See [Real-time pipeline](#real-time-pipeline-kafka) below.
@@ -105,7 +105,7 @@ Sentinel_Satellite_AI_Detection_System/
 │   ├── web/                             # live website (FastAPI + WebSocket)
 │   │   ├── analysis.py                  # Manual replay and agent analysis API
 │   │   ├── server.py
-│   │   └── static/                      # shared dashboard stylesheet
+│   │                                   # dashboard assets come from frontend/dist
 │   │
 │   └── reports/
 │       └── cybersecurity_lead_report.md
@@ -197,14 +197,14 @@ incident**, not per row, so its cost grows with the number of attacks, not the
 volume of telemetry. If several incidents open at once they queue in Kafka.
 
 ### Run it
-Requires Node.js 22, Docker Desktop (running), and `GROQ_API_KEY` in `.env` for live agents. The live dashboard uses React, TypeScript, and Vite. Build it from the repository root before starting the Python stack.
+Requires Node.js 22.12+ (tested with 22.23.2), Docker Desktop (running), and `GROQ_API_KEY` in `.env` for live agents. The live dashboard is the imported Replit React 19 / TypeScript / Tailwind 4 / Wouter application. Its pnpm workspace lives in `frontend/`, with the app in `frontend/artifacts/sentinelsat/`. Build it from the repository root before starting the Python stack.
 
 ```bash
 cd frontend
-npm ci
-npm run typecheck
-npm test
-npm run build
+npx pnpm@10.26.1 install --frozen-lockfile
+npx pnpm@10.26.1 run typecheck
+npx pnpm@10.26.1 test
+npx pnpm@10.26.1 run build
 cd ..
 ```
 ```bash
@@ -218,10 +218,14 @@ FastAPI serves the production dashboard at `http://127.0.0.1:8050` by default. R
 
 ```bash
 cd frontend
-npm run dev
+npx pnpm@10.26.1 run dev
 ```
 
 Open the URL printed by Vite. It proxies `/api` and `/ws` to FastAPI and reads `WEB_PORT` from the environment or the repository's `.env`.
+
+Use **Data source → Use Sample demo** for the separate deterministic browser demo. Local Threat Lab and Manual analysis use FastAPI; live agent analysis requires live mode and a Groq key.
+
+For the separate read-only HTTPS gateway, set `SENTINEL_DEPLOYMENT=gateway` plus server-only `SENTINEL_API_ORIGIN` and `SENTINEL_API_TOKEN` before running Vite. Never prefix secrets with `VITE_`. A static gateway build needs its own authenticated hosting proxy; Vite preview does not proxy API requests. See [Replit migration verification](docs/replit-migration.md).
 
 See the [dashboard migration checklist](docs/dashboard-migration.md) for view behavior and the browser API contract.
 `Ctrl+C` stops the services; `docker compose down` stops Kafka. Logs: `data/live/logs/`.

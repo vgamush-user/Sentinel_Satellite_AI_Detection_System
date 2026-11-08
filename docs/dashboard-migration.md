@@ -1,3 +1,7 @@
+# Historical dashboard migration
+
+This document records the superseded frontend. The active Replit frontend and current commands are documented in [replit-migration.md](replit-migration.md). Backend contracts below remain historical reference; verify against Python source.
+
 # Dashboard migration checklist
 
 The baseline is the FastAPI dashboard served from the former static HTML and JavaScript. The React implementation keeps its hash routes and stylesheet.
