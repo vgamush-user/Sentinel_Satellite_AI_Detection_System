@@ -513,15 +513,21 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 #t-origin { color: var(--text); font-weight: 650; }
 .feature-group { min-width: 0; border: 0; border-top: 1px solid var(--line); margin: 12px 0 0; padding: 6px 0 0; }
 .feature-group legend { padding: 0 8px 0 0; color: var(--text); font-size: 13px; font-weight: 650; }
-#overview-view { grid-template-columns: minmax(0, 1fr) minmax(255px, 29%); }
-#overview-view .intro { grid-column: 1; grid-row: 1; padding: 12px 0; }
-#overview-view .session-summary { grid-column: 2; grid-row: 1; background: var(--panel-2); }
+#overview-view { grid-template-columns: minmax(0, 1fr) minmax(195px, 26%); }
+#overview-view .intro { grid-column: 1; grid-row: 1; padding: 16px; }
+#overview-view .session-summary { grid-column: 2; grid-row: 1; align-self: stretch; }
 #overview-view .scenarios { grid-column: 1 / -1; grid-row: 2; }
+#method-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#method-view .methodology:last-child { grid-column: 1 / -1; }
+#method-view .agent-trace { grid-template-columns: 1fr; }
 @media (min-width: 721px) {
   .workspace-nav .btn[aria-pressed="true"] { box-shadow: inset 3px 0 var(--accent); }
 }
 @media (min-width: 901px) {
   #feed { max-height: 216px; overflow: auto; }
+  .scenario-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .scenario { padding: 10px; }
+  .scenario h3 { font-size: 14px; }
 }
 @media (max-width: 900px) {
   #live-view { grid-template-columns: minmax(0, 1fr); grid-template-areas: "chart" "inspector" "feed" "pipeline"; }
@@ -546,7 +552,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   #card-chart .hint { font-size: 12px; }
   #card-feed .telemetry-row { min-height: 44px; }
   #card-tracker { position: static; grid-column: 1; grid-row: auto; }
-  #overview-view { grid-template-columns: minmax(0, 1fr); }
+  #overview-view, #method-view { grid-template-columns: minmax(0, 1fr); }
   #overview-view .intro, #overview-view .scenarios, #overview-view .session-summary { grid-area: auto; }
   #overview-view .scenarios { grid-row: 2; }
   #overview-view .session-summary { grid-row: 3; }
