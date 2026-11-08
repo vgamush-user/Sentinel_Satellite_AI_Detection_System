@@ -1,21 +1,17 @@
 {
-  "name": "sentinelsat-dashboard",
-  "private": true,
-  "type": "module",
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test replay.test.mjs"
+    "dev": "pnpm --filter @workspace/sentinelsat dev",
+    "build": "pnpm run typecheck && pnpm --filter @workspace/sentinelsat build",
+    "typecheck": "tsc --build lib/api-client-react && pnpm --filter @workspace/sentinelsat typecheck",
+    "test": "pnpm --filter @workspace/sentinelsat test"
   },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
+  "private": true,
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "typescript": "~5.8.0",
-    "vite": "^6.4.0"
-  }
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3"
+  },
+  "packageManager": "pnpm@10.26.1"
 }

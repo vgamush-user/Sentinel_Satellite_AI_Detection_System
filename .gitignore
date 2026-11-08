@@ -12,3 +12,10 @@ frontend/node_modules/
 frontend/dist/
 .playwright-cli/
 .playwright-mcp/
+
+# Migration inputs and browser verification artifacts
+output/
+SentinelSat-Telemetry-Operations.zip
+**/node_modules/
+**/*.tsbuildinfo
+frontend/lib/*/dist/

@@ -20,7 +20,6 @@ from pathlib import Path, PureWindowsPath
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from streaming.config import (AGENT_MODE, BOOTSTRAP, CLASS_NAMES, DATASETS, FEATURE_ORDER, INCIDENT_CLOSE_GAP_ROWS,
@@ -218,7 +217,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sentinel live monitor", lifespan=lifespan)
 app.include_router(analysis_router)
 app.post("/api/analysis/predict")(predict_anomaly)
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 # --------------------------------------------------------------------------- #
@@ -227,14 +225,15 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 @app.get("/")
 def index():
     if not (FRONTEND / "index.html").is_file():
-        raise HTTPException(503, "Dashboard build missing. Run npm ci and npm run build in the frontend directory.")
+        raise HTTPException(503, "Dashboard build missing. In frontend run: npx pnpm@10.26.1 install --frozen-lockfile, then npx pnpm@10.26.1 run build.")
     return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/assets/{filename}", include_in_schema=False)
+@app.get("/assets/{filename:path}", include_in_schema=False)
 def frontend_asset(filename: str):
-    asset = FRONTEND / "assets" / filename
-    if asset.parent != FRONTEND / "assets" or not asset.is_file():
+    directory = (FRONTEND / "assets").resolve()
+    asset = (directory / filename).resolve()
+    if not asset.is_relative_to(directory) or not asset.is_file():
         raise HTTPException(404, "asset not found")
     return FileResponse(asset)
 
@@ -364,6 +363,23 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         clients.discard(ws)
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def frontend_page(path: str):
+    """Serve public files and client routes without swallowing API/asset errors."""
+    if path.split("/", 1)[0] in {"api", "ws", "assets", "static"}:
+        raise HTTPException(404, "not found")
+    directory = FRONTEND.resolve()
+    asset = (directory / path).resolve()
+    if not asset.is_relative_to(directory):
+        raise HTTPException(404, "not found")
+    if asset.is_file():
+        return FileResponse(asset)
+    # Missing files must not return the HTML shell (including fonts and scripts).
+    if Path(path).suffix:
+        raise HTTPException(404, "asset not found")
+    return index()
 
 
 def main():
