@@ -149,11 +149,13 @@ def analysis_trace(monitor, result=None):
     pending = "Waiting for analysis output" if result is None else "Output unavailable"
     outputs = result or {}
     return "\n".join((
-        f"1. **Monitor** — {monitor.removeprefix('Monitor: ')}",
-        f"2. **Classifier** — {'Prediction returned' if outputs.get('classification') else pending}",
-        f"3. **SPARTA Analyst** — {'Context returned' if outputs.get('sparta_context') else pending}",
-        f"4. **Mitigation** — {'Policy explanation returned' if outputs.get('mitigation') else pending}",
-        f"5. **Incident Reporter** — {'Narrative returned' if outputs.get('report') and outputs.get('status') != 'ERROR' else pending}",
+        "| Stage | Available evidence |",
+        "| --- | --- |",
+        f"| **01 · Monitor** | {monitor.removeprefix('Monitor: ')} |",
+        f"| **02 · Classifier** | {'Prediction returned' if outputs.get('classification') else pending} |",
+        f"| **03 · SPARTA Analyst** | {'Context returned' if outputs.get('sparta_context') else pending} |",
+        f"| **04 · Mitigation** | {'Policy explanation returned' if outputs.get('mitigation') else pending} |",
+        f"| **05 · Incident Reporter** | {'Narrative returned' if outputs.get('report') and outputs.get('status') != 'ERROR' else pending} |",
     ))
 
 
@@ -309,9 +311,23 @@ DASHBOARD_THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="gray").set(
     button_primary_text_color="#FFFFFF",
 )
 THEME_IN_BLOCKS = "theme" in signature(gr.Blocks).parameters
+CSS_IN_BLOCKS = "css" in signature(gr.Blocks).parameters
+DASHBOARD_CSS = """
+.analysis-console {
+    background: #152621 !important;
+    border: 1px solid #456257 !important;
+    border-radius: 12px;
+    padding: 16px;
+}
+.analysis-console .prose :is(h3, p, th, td, strong) { color: #eef5f0 !important; }
+.analysis-console .prose :is(th, td) { border-color: #456257 !important; }
+.analysis-console .prose table { margin-bottom: 0; }
+.research-guide .prose :is(th, td) { padding: 0.65rem 0.5rem; }
+"""
 
 with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
-               **({"theme": DASHBOARD_THEME} if THEME_IN_BLOCKS else {})) as demo:
+               **({"theme": DASHBOARD_THEME} if THEME_IN_BLOCKS else {}),
+               **({"css": DASHBOARD_CSS} if CSS_IN_BLOCKS else {})) as demo:
     gr.Markdown("# SentinelSat\nCubeSat telemetry security")
     with gr.Tab("Overview"):
         gr.Markdown(
@@ -373,31 +389,38 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
         label_bar = gr.BarPlot(x="Label", y="Count", label=" ", y_lim=[0, None]) if hasattr(gr, "BarPlot") else gr.Dataframe()
 
     with gr.Tab("Analyze"):
+        live_available = bool(os.environ.get("GROQ_API_KEY"))
         gr.Markdown(
             "## Analyze a telemetry window\n"
-            "Live analysis uses the latest replay row at the time you submit. "
-            "The Monitor screens the row automatically. The remaining four stages run only on request."
+            "Full analysis uses the latest simulated replay row at submission."
         )
-        with gr.Accordion("Analysis stages", open=True):
-            trace = gr.Markdown(analysis_trace("Monitor: waiting for an analysis request."))
-        escalation_indicator = gr.Markdown("Monitor: waiting for replay data.")
-        analyze_btn = gr.Button("Run full agent analysis", variant="primary",
-                                interactive=bool(os.environ.get("GROQ_API_KEY")))
-        if not os.environ.get("GROQ_API_KEY"):
-            gr.Markdown("Live analysis is unavailable on this server. Cached examples are available in Overview.")
-        analysis_status = gr.Markdown("")
-        analysis_header = gr.Markdown("")
-        analysis_policy = gr.Markdown("")
-        with gr.Accordion("AI narrative", open=False):
-            analysis_report = gr.Markdown("")
+        with gr.Row():
+            with gr.Column(scale=2, min_width=280, elem_classes=["analysis-console"]):
+                gr.Markdown("### Analysis trace\nStage evidence appears when the pipeline returns its output.")
+                trace = gr.Markdown(analysis_trace(
+                    "Monitor: no analysis run yet.", None if live_available else {},
+                ))
+            with gr.Column(scale=1, min_width=250):
+                gr.Markdown("### Replay input")
+                escalation_indicator = gr.Markdown("Monitor: waiting for replay data.")
+                analyze_btn = gr.Button("Run full agent analysis", variant="primary", interactive=live_available)
+                if not live_available:
+                    gr.Markdown("Live analysis is unavailable on this server. Cached examples are available in Overview.")
+                analysis_status = gr.Markdown("")
+        with gr.Group():
+            analysis_header = gr.Markdown("")
+            analysis_policy = gr.Markdown("")
+            with gr.Accordion("AI narrative", open=False):
+                analysis_report = gr.Markdown("")
     with gr.Tab("How it works"):
         gr.Markdown(
-            "## Hosted demo · Five-stage analysis\n"
-            "The statistical Monitor screens the replayed window. On request, the Classifier, "
-            "SPARTA Analyst, Mitigation and Incident Reporter return outputs for review.\n\n"
-            "## Web workspace · Kafka telemetry replay\n"
-            "The separate web workspace scores replay and test rows, then opens incidents "
-            "using its configured confidence and row-count guards.\n\n"
+            "## From telemetry to review\n"
+            "Both workflows use simulated CubeSat telemetry.\n\n"
+            "| Stage | Web workspace | Analysis demo |\n"
+            "| --- | --- | --- |\n"
+            "| **Input** | Replay or injected test rows | Latest replay window at submission |\n"
+            "| **Trigger** | Confidence and row-count guards | Statistical Monitor, then full analysis on request |\n"
+            "| **Output** | Scored rows, incident evidence, and report when available | Prediction, SPARTA context, policy outcome, and narrative when returned |\n\n"
             "## Reported model evaluation\n"
             "**68.9% domain-shift accuracy · 0.697 macro F1.** The project report describes training "
             "on clean simulated telemetry and evaluating on noised telemetry. Near-perfect clean "
@@ -406,7 +429,8 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
             "The reported experiment counted 1,786 Normal windows predicted as Data Injection. "
             "An adversarial Command Flooding and Data Injection blend produced a 0.999-confidence prediction. "
             "SPARTA mapping provides context for review and does not establish attribution. "
-            "Per-window feature attribution is unavailable."
+            "Per-window feature attribution is unavailable.",
+            elem_classes=["research-guide"],
         )
 
     # --- wiring ---
@@ -433,4 +457,5 @@ with gr.Blocks(title="SentinelSat · CubeSat telemetry security",
     )
 
 if __name__ == "__main__":
-    demo.queue().launch(**({} if THEME_IN_BLOCKS else {"theme": DASHBOARD_THEME}))
+    demo.queue().launch(**({} if THEME_IN_BLOCKS else {"theme": DASHBOARD_THEME}),
+                        **({} if CSS_IN_BLOCKS else {"css": DASHBOARD_CSS}))

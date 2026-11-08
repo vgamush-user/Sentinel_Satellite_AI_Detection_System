@@ -49,8 +49,18 @@
 
 <section class="grid intro-view" id="method-view" aria-labelledby="show-method" hidden>
   <section class="card methodology workflow-overview">
-    <h2>Two ways to explore SentinelSat</h2>
-    <dl class="result-facts"><div><dt>Web workspace</dt><dd>Replay or test rows → detector → incident when guards are met</dd></div><div><dt>Analysis demo</dt><dd>Replay window → Monitor → full analysis on request</dd></div></dl>
+    <p class="dashboard-label">Field guide</p>
+    <h2>From telemetry to review</h2>
+    <p>Both workflows use simulated CubeSat telemetry. They differ in when analysis starts and what evidence they return.</p>
+    <table class="research-table">
+      <caption class="sr-only">Comparison of SentinelSat workflows</caption>
+      <thead><tr><th scope="col">Stage</th><th scope="col">Web workspace</th><th scope="col">Analysis demo</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Input</th><td>Replay or injected test rows</td><td>Latest replay window at submission</td></tr>
+        <tr><th scope="row">Trigger</th><td>Incident guards for confidence and row count</td><td>Statistical screening, then full analysis on request</td></tr>
+        <tr><th scope="row">Output</th><td>Scored rows, incident evidence, and report when available</td><td>Prediction, SPARTA context, policy outcome, and narrative when returned</td></tr>
+      </tbody>
+    </table>
   </section>
   <section class="card methodology">
     <h2>Hosted demo · Five-stage analysis</h2>
