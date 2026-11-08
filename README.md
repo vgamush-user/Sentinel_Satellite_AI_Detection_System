@@ -8,6 +8,10 @@ an incident report. A live website shows all of it as it happens.
 
 **Quick start (real-time system):** start Docker Desktop, then
 ```bash
+cd frontend
+npm ci
+npm run build
+cd ..
 python scripts/start_all.py --open
 ```
 Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.
@@ -103,7 +107,7 @@ Sentinel_Satellite_AI_Detection_System/
 │   │
 │   ├── web/                             # live website (FastAPI + WebSocket)
 │   │   ├── server.py
-│   │   └── static/                      # index.html, app.js, style.css
+│   │   └── static/                      # shared dashboard stylesheet
 │   │
 │   └── reports/
 │       └── cybersecurity_lead_report.md
@@ -195,13 +199,33 @@ incident**, not per row, so its cost grows with the number of attacks, not the
 volume of telemetry. If several incidents open at once they queue in Kafka.
 
 ### Run it
-Requires Docker Desktop (running) and `GROQ_API_KEY` in `.env` for live agents.
+Requires Node.js 22, Docker Desktop (running), and `GROQ_API_KEY` in `.env` for live agents. The live dashboard uses React, TypeScript, and Vite. Build it from the repository root before starting the Python stack.
+
+```bash
+cd frontend
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..
+```
 ```bash
 pip install -r requirements.txt
 python scripts/start_all.py --open                 # live agents on Groq
 python scripts/start_all.py --agents cached        # offline demo: stored reports, no Groq calls
 python scripts/start_all.py --speed 20 --mode all  # replay every row (attacks come as long blocks)
 ```
+
+FastAPI serves the production dashboard at `http://127.0.0.1:8050` by default. Rebuild after frontend changes. For frontend development with hot reload, leave the Python stack running and start Vite in a second terminal.
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open the URL printed by Vite. It proxies `/api` and `/ws` to FastAPI and reads `WEB_PORT` from the environment or the repository's `.env`.
+
+See the [dashboard migration checklist](docs/dashboard-migration.md) for view behavior and the browser API contract.
 `Ctrl+C` stops the services; `docker compose down` stops Kafka. Logs: `data/live/logs/`.
 
 ### Sending new entries

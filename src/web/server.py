@@ -30,6 +30,7 @@ from streaming import inject, storage
 from streaming.topics import ensure_topics
 
 STATIC = Path(__file__).resolve().parent / "static"
+FRONTEND = STATIC.parents[2] / "frontend" / "dist"
 DEMO_CACHE = STATIC.parents[1] / "pipeline" / "demo_cache.json"
 QUALITY = {"clean": "raw", "noisy": "noised"}  # UI name -> dataset key
 CHART_FEATURES = ("MessageRateInWindow", "AverageMessageLengthInWindow", "MemoryAnonMB")
@@ -220,7 +221,17 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # --------------------------------------------------------------------------- #
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    if not (FRONTEND / "index.html").is_file():
+        raise HTTPException(503, "Dashboard build missing. Run npm ci and npm run build in the frontend directory.")
+    return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/assets/{filename}", include_in_schema=False)
+def frontend_asset(filename: str):
+    asset = FRONTEND / "assets" / filename
+    if asset.parent != FRONTEND / "assets" or not asset.is_file():
+        raise HTTPException(404, "asset not found")
+    return FileResponse(asset)
 
 
 @app.get("/api/state")
