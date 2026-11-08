@@ -8,7 +8,7 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/lib/backend/backend.test.ts server/gateway.test.ts"
+    "test": "tsx --test src/lib/backend/backend.test.ts src/lib/sentinel/state.test.ts src/lib/sentinel/freshness.test.ts src/lib/sentinel/chart-model.test.ts server/gateway.test.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
