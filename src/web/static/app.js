@@ -363,8 +363,8 @@ function setupStatic() {
     });
   }
   $("back-incident").addEventListener("click", () => {
-    const { id, rows, incidentOpener, disclosures } = S.evidence;
-    openDrawer(id, rows, incidentOpener, disclosures);
+    const { id, rows, incidentOpener, disclosures, returnRow } = S.evidence;
+    openDrawer(id, rows, incidentOpener, { disclosures, returnRow });
   });
 
   window.addEventListener("resize", drawChart);
@@ -640,12 +640,12 @@ function drawChart() {
   g.fillText(evidence ? "snapshot end" : "now", W - pad.r, H - 5);
 }
 
-function showEvidence(selection, triggerIds, matching) {
-  const first = matching[0];
+function showEvidence(selection, triggerIds, matching, returnRow) {
   selection.disclosures = [...$("dr-body").querySelectorAll("details[open] > summary")].map((summary) => summary.textContent);
   closeDrawer(false);
-  showSnapshot({ id: selection.id, rows: selection.rows, triggerIds, first,
-    last: matching.at(-1), selected: first, matchingCount: matching.length, incidentOpener: selection.opener, disclosures: selection.disclosures });
+  showSnapshot({ id: selection.id, rows: selection.rows, triggerIds, first: matching[0],
+    last: matching.at(-1), selected: returnRow ?? matching[0],
+    matchingCount: matching.length, incidentOpener: selection.opener, disclosures: selection.disclosures, returnRow });
 }
 
 function showSnapshot(snapshot) {
@@ -809,12 +809,12 @@ function md(text) {
   return html;
 }
 
-async function openDrawer(id, evidenceRows, opener = document.activeElement, snapshotDisclosures = null) {
+async function openDrawer(id, evidenceRows, opener = document.activeElement, snapshotReturn = null) {
   const selection = {
     id,
     rows: evidenceRows ?? [...new Map(S.recent.map((row) => [row.entry_id, row])).values()],
     opener,
-    snapshotDisclosures,
+    snapshotDisclosures: snapshotReturn?.disclosures,
   };
   const cached = S.incidents.get(id) || {};
   drawerSelection = selection;
@@ -823,8 +823,9 @@ async function openDrawer(id, evidenceRows, opener = document.activeElement, sna
   $("incidents-view").classList.add("has-detail");
   renderIncidents();
   renderDrawer();
-  if (snapshotDisclosures) window.scrollTo(0, workspaceScroll.get("incidents") || 0);
-  ((snapshotDisclosures && $("view-trigger-rows")) || $("dr-close")).focus();
+  if (snapshotReturn) window.scrollTo(0, workspaceScroll.get("incidents") || 0);
+  const trigger = snapshotReturn?.returnRow != null ? incidentTriggerButton(snapshotReturn.returnRow) : null;
+  (trigger || (snapshotReturn && $("view-trigger-rows")) || $("dr-close")).focus();
 
   try {
     const response = await fetch(`/api/incidents/${encodeURIComponent(id)}`);
@@ -836,6 +837,10 @@ async function openDrawer(id, evidenceRows, opener = document.activeElement, sna
     S.incidents.set(id, { ...cached, ...stored, ...liveChanges });
     renderDrawer();
   } catch (_) { /* keep the incident data already shown */ }
+}
+
+function incidentTriggerButton(index) {
+  return $("dr-body").querySelector(`[data-trigger-row="${CSS.escape(index)}"]`);
 }
 
 function renderDrawer() {
@@ -864,31 +869,50 @@ function renderDrawer() {
   selection.snapshotDisclosures = null;
   body.dataset.incidentId = id;
   const review = i.report_mode === "live" && status === "FLAGGED_FOR_REVIEW";
-  const narrative = complete
-    ? outputDetails("Incident narrative", i.report) + outputDetails("SPARTA threat context", i.sparta_context)
-    : `<p class="hint">${reportProgress(i)}</p>`;
+  const triggerPreview = matching.slice(0, 3).map((index) => {
+    const row = rows[index];
+    return `<li><button class="evidence-row" type="button" data-trigger-row="${index}">
+      <span><strong>${esc(row.predicted_class)}</strong><small>${esc(row.entry_id)} · ${fmtTime(row.ts)}</small></span>
+      <span><strong>${row.confidence.toFixed(3)}</strong><small>Confidence</small></span>
+      <span aria-hidden="true">↗</span>
+    </button></li>`;
+  }).join("");
 
   body.innerHTML = `
-    <div class="dr-head">
-      <p class="dashboard-label">Incident inspector</p>
-      <h3 id="dr-title">Predicted: ${cls(i.attack_class)}</h3>
-      <p class="hint">${esc(id)} · ${i.status === "open" ? "Open" : "Closed"}</p>
-      <p class="hint">${provenance} · ${esc(reportProgress(i))}</p>
+    <div class="incident-console">
+      <div class="incident-console-meta"><span>${esc(id)}</span><span class="console-tag">${i.status === "open" ? "Open" : "Closed"}</span></div>
+      <p class="console-label">Predicted class</p>
+      <h3 id="dr-title">${esc(i.attack_class || "Unavailable")}</h3>
+      <p class="console-source">${provenance}</p>
     </div>
-    ${matching.length ? '<button class="btn incident-evidence-action" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
-    ${resultSections({
-      prediction: `${review ? '<p class="review-note"><strong>Awaiting review</strong> · Check the evidence before interpreting the policy outcome.</p>' : agentBadge(i)}
+    <div class="incident-sections">
+      <section><h4>Prediction and review</h4>
+        ${review ? '<p class="review-note"><strong>Awaiting review</strong> · Check the evidence before interpreting the policy outcome.</p>' : agentBadge(i)}
         <dl class="result-facts">${fact("Peak model confidence", i.peak_confidence?.toFixed(4))}
         ${fact("Ground truth (incident sample)", i.sample_true_class)}
-        ${i.report_predicted_class && !cached ? fact("Analysis prediction", i.report_predicted_class) + fact("Analysis confidence", i.report_confidence) : ""}</dl>
-        <p class="hint">${confidenceNote}</p>`,
-      evidence: `<p>${evidenceSummary}</p>
+        ${i.report_predicted_class && i.report_mode === "live" ? fact("Analysis prediction", i.report_predicted_class) + fact("Analysis confidence", i.report_confidence) : ""}</dl>
+        <p class="hint">${confidenceNote}</p>
+      </section>
+      <section><div class="evidence-heading"><h4>Trigger evidence</h4>
+        ${matching.length ? '<button class="btn" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
+        </div><p class="hint">${evidenceSummary}${matching.length > 3 ? " Showing the first 3 below." : ""}</p>
+        ${triggerPreview ? `<ul class="evidence-rows">${triggerPreview}</ul>` : ""}
         <p class="hint">Per-window feature attribution is unavailable.</p>
-        ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}`,
-      policy: `<p class="hint">Structured policy details are unavailable for this incident. Policy explanations describe simulated outcomes.</p>
-        ${complete ? outputDetails("Policy explanation · AI-generated", i.mitigation) : ""}`,
-      narrative: narrative || '<p class="hint">Narrative unavailable.</p>',
-    })}
+        ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}
+      </section>
+      <section><h4>SPARTA context <span class="badge">AI-generated</span></h4>
+        <p class="hint">${provenance}. Threat mapping provides context for review.</p>
+        ${complete && i.sparta_context ? outputDetails("View SPARTA mapping", i.sparta_context) : '<p class="hint">SPARTA mapping unavailable.</p>'}
+      </section>
+      <section><h4>Policy outcome</h4>
+        <p class="hint">Structured policy details are unavailable. Policy explanations describe simulated outcomes.</p>
+        ${complete ? outputDetails("Policy explanation · AI-generated", i.mitigation) : ""}
+      </section>
+      <section><h4>AI narrative</h4>
+        <p class="hint">${esc(reportProgress(i))}</p>
+        ${complete ? outputDetails("Incident narrative", i.report) || '<p class="hint">Narrative unavailable.</p>' : ""}
+      </section>
+    </div>
     <details class="incident-properties"><summary>Incident properties</summary>
       <dl class="result-facts">
         ${fact("Opened", fmtTime(i.opened_ts, true))}
@@ -910,6 +934,12 @@ function renderDrawer() {
   }
   const button = $("view-trigger-rows");
   button?.addEventListener("click", () => showEvidence(selection, triggerIds, matching));
+  body.querySelectorAll("[data-trigger-row]").forEach((rowButton) => {
+    rowButton.addEventListener("click", () => showEvidence(selection, triggerIds, matching, Number(rowButton.dataset.triggerRow)));
+  });
+  if (previousFocus.dataset.triggerRow != null) {
+    (incidentTriggerButton(previousFocus.dataset.triggerRow) || button || $("dr-close")).focus({ preventScroll: true });
+  }
   if (previousFocus.id === "view-trigger-rows") (button ?? $("dr-close")).focus({ preventScroll: true });
 }
 
