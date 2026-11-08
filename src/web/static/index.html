@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SentinelSat · CubeSat telemetry security</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=acru-2">
 </head>
 <body>
+<div class="dashboard-shell">
 <aside class="sidebar">
   <div class="brand"><div class="logo" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="30" height="30"><circle cx="16" cy="16" r="5" fill="currentColor"/><ellipse cx="16" cy="16" rx="14" ry="6" fill="none" stroke="currentColor" stroke-width="1.6" transform="rotate(-25 16 16)"/></svg>
@@ -73,24 +74,29 @@
 </section>
 
 <section class="grid" id="live-view" aria-labelledby="show-live" hidden>
-  <section class="card telemetry-status" aria-label="Replay system status">
-    <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong></div>
-    <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
-    <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
-    <div class="replay-metric"><span>Replay dataset</span><strong id="st-dataset">Unknown</strong></div>
-  </section>
   <section class="card" id="card-chart">
-    <div class="card-head">
-      <div><p class="dashboard-label">Score timeline</p><h2 id="chart-heading" tabindex="-1">Telemetry replay</h2></div>
-      <span class="badge" id="chart-mode">Live replay</span>
+    <div class="chart-main">
+      <div class="card-head">
+        <div>
+          <p class="chart-total" id="chart-total">–</p>
+          <h2 id="chart-heading" tabindex="-1">Rows scored</h2>
+          <p class="chart-dataset"><span>Replay dataset</span> · <strong id="st-dataset">Unknown</strong></p>
+        </div>
+        <span class="badge" id="chart-mode">Live replay</span>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chart-wrap" id="chart-wrap">
+        <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+      </div>
+      <details class="chart-guide"><summary>How to read this chart</summary>
+        <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
+      </details>
     </div>
-    <div class="legend" id="legend"></div>
-    <div class="chart-wrap" id="chart-wrap">
-      <canvas id="chart" aria-label="Threat score of the last 300 telemetry rows"></canvas>
+    <div class="telemetry-status" aria-label="Replay system status">
+      <div class="replay-metric"><span>Replay connection</span><strong id="pill-kafka"><i class="dot" aria-hidden="true"></i><span id="kafka-status">Status unavailable</span></strong></div>
+      <div class="replay-metric"><span>Throughput</span><strong><b id="st-rate">–</b> <small>rows/s</small></strong></div>
+      <div class="replay-metric"><span>Median latency</span><strong id="st-lat">–</strong></div>
     </div>
-    <details class="chart-guide"><summary>How to read this chart</summary>
-      <p class="hint">Each dot shows a row’s threat score (1 &minus; P(Normal)) and predicted class. Larger dots mark attack predictions that meet the incident manager’s per-row confidence guard (&ge; <span class="g-conf">0.7</span>). Thin gray rings mark injected rows. A teal outline marks the selected row.</p>
-    </details>
   </section>
 
   <aside class="telemetry-inspector" aria-labelledby="telemetry-inspector-title">
@@ -105,11 +111,11 @@
         </dl>
       </div>
       <div id="chart-evidence" class="evidence-controls" hidden>
-        <p class="inspector-guide" id="evidence-summary"></p>
+        <div class="snapshot-state"><p class="inspector-guide" id="evidence-summary"></p><button type="button" class="btn" id="back-live">Resume live view</button></div>
         <dl id="evidence-detail" class="inspector-facts"></dl>
         <label for="evidence-row">Inspect snapshot row</label>
         <input id="evidence-row" type="range" min="1" max="1" value="1" step="1">
-        <div class="evidence-actions"><button type="button" class="btn" id="back-live">Resume live view</button> <button type="button" class="btn ghost" id="back-incident">Back to incident</button></div>
+        <div class="evidence-actions"><button type="button" class="btn ghost" id="back-incident">Back to incident</button></div>
       </div>
     </section>
     <section class="card prediction-mix" id="prediction-mix">
@@ -233,6 +239,7 @@
 </section>
 </main>
 </div>
+</div>
 
 <dialog id="simulation" aria-labelledby="simulation-title">
   <form id="simulation-form">
@@ -251,6 +258,6 @@
   </form>
 </dialog>
 <div id="toast-root" class="toast-container" aria-live="polite"></div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=acru-2"></script>
 </body>
 </html>

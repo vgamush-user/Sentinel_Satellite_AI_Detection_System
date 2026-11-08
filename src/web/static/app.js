@@ -223,7 +223,8 @@ function setupStatic() {
   $("pc-guard").textContent = `${g.min_rows} of ${g.window_rows} rows ≥ ${g.min_confidence}`;
   $("st-mode").textContent = S.config.agent_mode;
 
-  $("legend").innerHTML = S.config.classes.map((c) => `<span><i style="background:var(${classColorToken(c)})"></i>${esc(c)}</span>`).join("");
+  const shortClass = { "Storage Exhaustion": "Storage", "Command Flooding": "Flooding", "Data Injection": "Injection", "Defence Impairment": "Defence" };
+  $("legend").innerHTML = S.config.classes.map((c) => `<span title="${esc(c)}"><i style="background:var(${classColorToken(c)})"></i><span aria-hidden="true">${esc(shortClass[c] || c)}</span><span class="sr-only">${esc(c)}</span></span>`).join("");
 
   const attackOptions = S.config.classes.filter((c) => c !== "Normal")
     .map((c) => `<option>${esc(c)}</option>`).join("");
@@ -440,6 +441,7 @@ function renderStats(s) {
   $("st-last-row").textContent = s.last_row_age_sec == null ? "–" : `${s.last_row_age_sec.toFixed(1)} s ago`;
   $("st-incidents").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rows").textContent = s.rows_total.toLocaleString();
+  $("chart-total").textContent = s.rows_total.toLocaleString();
   $("overview-session").textContent = `${$("st-dataset").textContent} · ${s.rows_total.toLocaleString()} rows scored · ${s.rows_per_sec} rows/s`;
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rep").textContent = (s.counts.reports_finished || 0).toLocaleString();
@@ -560,6 +562,7 @@ function drawChart() {
   rows.forEach((r, i) => {
     const passesGuard = r.predicted_class !== "Normal" && r.confidence >= thr;
     const rad = passesGuard ? 4 : 2.2;
+    g.globalAlpha = evidence && evidence.selected !== i && !evidence.triggerIds.has(r.entry_id) ? .34 : 1;
     g.fillStyle = colors.get(r.predicted_class) || muted;
     g.beginPath(); g.arc(x(i), y(r.threat), rad, 0, Math.PI * 2); g.fill();
     if (r.source !== "replay") {
@@ -575,6 +578,7 @@ function drawChart() {
       g.beginPath(); g.arc(x(i), y(r.threat), rad + 5, 0, Math.PI * 2); g.stroke();
     }
   });
+  g.globalAlpha = 1;
   g.fillStyle = muted;
   g.fillText(evidence ? "snapshot start" : "older", pad.l, H - 5);
   g.textAlign = "right";
@@ -592,7 +596,6 @@ function showSnapshot(snapshot) {
   S.evidence = snapshot;
   $("live-view").classList.add("is-snapshot");
   showWorkspace("live");
-  $("chart-heading").textContent = snapshot.id ? "Incident telemetry" : "Telemetry snapshot";
   $("chart").setAttribute("aria-label", "Frozen telemetry snapshot with the selected row highlighted");
   $("chart-evidence").hidden = false;
   $("live-context").hidden = true;
@@ -638,7 +641,6 @@ function returnToLive() {
   $("prediction-mix").hidden = false;
   $("chart-mode").textContent = "Live replay";
   $("feed-heading").textContent = "Recent telemetry rows";
-  $("chart-heading").textContent = "Telemetry replay";
   $("chart").setAttribute("aria-label", "Threat score of the last 300 telemetry rows");
   drawChart();
   renderFeed();

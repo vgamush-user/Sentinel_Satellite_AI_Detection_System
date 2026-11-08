@@ -1,9 +1,10 @@
 :root {
   color-scheme: light;
-  --bg: #f2f4f5;
+  --canvas: #dedfdd;
+  --bg: #f0f1f0;
   --panel: #ffffff;
   --panel-2: #eaf3f0;
-  --line: #dce4e3;
+  --line: #e1e5e0;
   --text: #152623;
   --muted: #52645f;
   --accent: #237a70;
@@ -20,7 +21,7 @@
   --c-cf: #b83e44;
   --c-di: #6c478c;
   --c-dim: #346a9b;
-  --radius: 12px;
+  --radius: 8px;
 
   /* Motion Tokens (Emil Kowalski Design Engineering Standards) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -32,6 +33,7 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --canvas: #101816;
   --bg: #15201e;
   --panel: #1c2b28;
   --panel-2: #243632;
@@ -55,11 +57,19 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--text);
-  font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-  display: grid; grid-template-columns: 204px minmax(0, 1fr); min-height: 100vh;
+  font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh;
+  padding: clamp(16px, 10.55vh, 95px) 16px 30px;
 }
+.dashboard-shell {
+  display: grid; grid-template-columns: 165px minmax(0, 1fr);
+  max-width: 1060px; min-height: 710px; margin-inline: auto;
+  background: var(--bg); border-radius: 22px; overflow: clip;
+  box-shadow: 0 24px 62px #26334322;
+}
+.workspace { min-width: 0; padding: 13px; }
 a { color: var(--accent); }
 h1, h2 { margin: 0; }
 small, .hint { color: var(--muted); }
@@ -76,10 +86,9 @@ button, select, input, a {
 
 /* ---------- workspace shell ---------- */
 .sidebar {
-  position: sticky; top: 0; height: 100dvh; align-self: start;
-  background: var(--panel); border-right: 1px solid var(--line); padding: 16px 10px;
+  background: var(--panel); border-right: 1px solid var(--line); padding: 16px 12px; min-width: 0;
 }
-.brand { display: flex; gap: 10px; align-items: center; padding: 2px 6px 20px; }
+.brand { display: flex; gap: 7px; align-items: center; padding: 0 0 18px; }
 .brand strong, .brand small { display: block; }
 .brand strong { font-size: 14px; font-weight: 650; }
 .brand small { font-size: 11px; }
@@ -90,10 +99,11 @@ button, select, input, a {
 .logo svg { width: 22px; height: 22px; }
 .top {
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
-  min-height: 64px; padding: 8px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+  min-height: 38px; margin-bottom: 12px;
 }
 .top #theme-toggle { margin-left: auto; }
-.top h1 { font-size: 22px; font-weight: 700; letter-spacing: -.025em; }
+.top .btn { background: var(--panel); font-size: 12px; }
+.top h1 { font-size: 17px; font-weight: 700; letter-spacing: -.025em; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); display: inline-block; }
 #pill-kafka.ok .dot { background: var(--ok); }
 
@@ -126,15 +136,15 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
 .workspace-nav { display: grid; gap: 3px; }
 .workspace-nav .btn {
   display: flex; align-items: center; gap: 9px; padding: 7px 8px;
-  text-align: left; text-decoration: none; background: transparent; border-color: transparent; color: var(--muted);
+  text-align: left; text-decoration: none; background: transparent; border-color: transparent; color: var(--muted); font-size: 13px;
 }
 .workspace-nav .btn:hover, .workspace-nav .btn[aria-pressed="true"] {
   background: var(--panel-2); color: var(--text);
 }
 .workspace-nav .btn[aria-pressed="true"] svg { color: var(--accent); }
-.grid { display: grid; gap: 14px; align-items: start; padding: 16px 24px 24px; }
+.grid { display: grid; gap: 10px; align-items: start; padding: 0; }
 [hidden] { display: none !important; }
-#lab-view { grid-template-columns: minmax(0, 2fr) minmax(235px, 1fr); }
+#lab-view { grid-template-columns: minmax(0, 1fr) minmax(195px, 26%); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .card-head h2 { font-size: 18px; }
@@ -142,7 +152,7 @@ button.stage:hover { border-color: var(--accent); background: var(--panel-2); }
 
 /* Fixed CSS height: the canvas's pixel size is set from it on every redraw */
 .chart-wrap { position: relative; width: 100%; }
-#chart { width: 100%; height: 260px; display: block; background: var(--bg); border-radius: var(--radius); }
+#chart { width: 100%; height: 158px; display: block; background: var(--panel); }
 .evidence-controls { margin-top: 12px; }
 #evidence-row { display: block; width: min(100%, 30rem); margin: 4px 0; accent-color: var(--accent); }
 #evidence-detail { margin-top: 4px; font-variant-numeric: tabular-nums; }
@@ -205,7 +215,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .tracker .cls i { margin-right: 4px; vertical-align: middle; }
 
 /* ---------- incidents ---------- */
-#incidents-view { display: grid; align-items: start; gap: 14px; padding: 16px 24px 24px; grid-template-columns: minmax(0, 1fr) minmax(300px, 42%); }
+#incidents-view { display: grid; align-items: start; gap: 10px; grid-template-columns: minmax(0, 1fr) minmax(290px, 39%); }
 #card-incidents { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .incident-toolbar .card-head { flex-basis: 100%; margin-bottom: 0; }
 .incident-toolbar {
@@ -321,7 +331,9 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 
 @media (max-width: 720px) {
-  body { grid-template-columns: minmax(0, 1fr); }
+  body { padding: 8px; }
+  .dashboard-shell { grid-template-columns: minmax(0, 1fr); border-radius: 14px; min-height: 0; }
+  .workspace { padding: 10px; }
   .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0 4px 8px; }
   .workspace-nav { display: flex; flex-wrap: wrap; }
@@ -358,7 +370,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 
 /* ---------- guided overview and methodology ---------- */
-.intro-view { max-width: 1420px; padding: 16px 24px 24px; gap: 14px; }
+.intro-view { gap: 10px; }
 .intro {
   padding: 4px 0 6px;
 }
@@ -436,19 +448,28 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .dashboard-label { margin: 0 0 4px; font-size: 12px; font-weight: 650; color: var(--muted); }
 .telemetry-inspector h2, .incident-preview h2 { font-size: 18px; letter-spacing: -.015em; }
 #live-view {
-  grid-template-columns: minmax(0, 1fr) minmax(255px, 29%);
-  grid-template-areas: "status status" "chart inspector" "feed inspector" "pipeline pipeline";
+  grid-template-columns: minmax(0, 1fr) minmax(195px, 26%);
+  grid-template-areas: "chart inspector" "feed inspector" "pipeline inspector";
 }
-.telemetry-status { grid-area: status; display: grid; grid-template-columns: 1.1fr .9fr .9fr 1.15fr; padding: 12px 0; }
-.replay-metric { padding: 0 16px; min-width: 0; }
-.replay-metric + .replay-metric { border-left: 1px solid var(--line); }
-.replay-metric > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.replay-metric strong { display: block; font-size: 17px; line-height: 1.3; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.replay-metric strong .dot { margin-right: 6px; vertical-align: 2px; }
-.replay-metric strong small { font-size: 12px; font-weight: 500; }
-#card-chart { grid-area: chart; }
-#card-chart .card-head { align-items: center; margin-bottom: 6px; }
-#card-chart .legend { gap: 4px 11px; margin-bottom: 9px; }
+#card-chart {
+  grid-area: chart; padding: 0; display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(115px, 23%);
+}
+.chart-main { min-width: 0; padding: 13px; }
+.chart-total { font-size: 30px; font-weight: 750; line-height: 1.1; letter-spacing: -.05em; margin: 0; font-variant-numeric: tabular-nums; }
+#card-chart .card-head { align-items: start; margin-bottom: 8px; }
+#chart-heading { display: inline; font-size: 12px; font-weight: 550; color: var(--muted); }
+.chart-dataset { display: inline; margin: 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.chart-dataset::before { content: " · "; }
+.chart-dataset strong { color: var(--text); }
+#card-chart .legend { gap: 3px 8px; margin-bottom: 6px; font-size: 11px; }
+.telemetry-status { display: grid; align-content: space-between; gap: 13px; border-left: 1px solid var(--line); padding: 15px 11px; }
+.replay-metric { min-width: 0; }
+.replay-metric > span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.replay-metric strong { display: block; font-size: 18px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#pill-kafka { font-size: 13px; }
+.replay-metric strong .dot { margin-right: 4px; }
+.replay-metric strong small { font-size: 11px; font-weight: 500; }
 #card-feed { grid-area: feed; }
 #card-feed .card-head { margin-bottom: 2px; }
 #card-feed .card-head .hint { margin: 0; }
@@ -458,9 +479,12 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .feed-time { color: var(--muted); }
 .telemetry-row[aria-pressed="true"] { background: var(--panel-2); box-shadow: inset 3px 0 var(--accent); }
 .telemetry-inspector { grid-area: inspector; position: sticky; top: 12px; }
-.telemetry-inspector > .card + .card { margin-top: 14px; }
-.chart-guide { margin-top: 8px; font-size: 12px; color: var(--muted); }
-.chart-guide summary { cursor: pointer; padding-block: 5px; }
+.telemetry-inspector > .card + .card { margin-top: 10px; }
+.snapshot-state .btn { font-size: 12px; margin-bottom: 10px; }
+.telemetry-inspector .inspector-facts > div { flex-wrap: wrap; gap: 2px 8px; }
+.telemetry-inspector .inspector-facts dd { margin-left: auto; }
+.chart-guide { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.chart-guide summary { cursor: pointer; padding-block: 2px; }
 .chart-guide[open] .hint { margin-top: 3px; }
 .prediction-mix ul { margin: 10px 0 0; padding: 0; list-style: none; }
 .prediction-mix li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; margin-top: 10px; font-size: 13px; }
@@ -473,6 +497,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .inspector-facts dt { font-size: 13px; color: var(--muted); }
 .inspector-facts dd { margin: 0; font-size: 13px; font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; }
 #evidence-detail > div:nth-child(-n+2) dd { font-size: 15px; }
+#evidence-detail > div:nth-child(-n+2) { background: var(--panel-2); padding-inline: 6px; }
 .evidence-controls label { margin-top: 12px; }
 .evidence-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .evidence-actions .btn { font-size: 13px; }
@@ -495,11 +520,11 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 @media (min-width: 721px) {
   .workspace-nav .btn[aria-pressed="true"] { box-shadow: inset 3px 0 var(--accent); }
 }
-@media (min-width: 1001px) {
-  #chart { height: 232px; }
+@media (min-width: 901px) {
+  #feed { max-height: 216px; overflow: auto; }
 }
-@media (max-width: 1000px) {
-  #live-view { grid-template-columns: minmax(0, 1fr); grid-template-areas: "status" "chart" "inspector" "feed" "pipeline"; }
+@media (max-width: 900px) {
+  #live-view { grid-template-columns: minmax(0, 1fr); grid-template-areas: "chart" "inspector" "feed" "pipeline"; }
   .telemetry-inspector { position: static; }
 }
 @media (max-width: 720px) {
@@ -509,16 +534,15 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   .workspace-nav .btn { justify-content: center; font-size: 12px; gap: 3px; line-height: 1.2; min-height: 44px; padding: 4px 2px; }
   .workspace-nav .btn svg { width: 13px; flex: none; }
   #show-method, .workspace-nav a.btn { grid-column: span 2; }
-  .top { padding-inline: 12px; min-height: 54px; }
+  .top { padding-inline: 0; min-height: 44px; }
   .top h1 { font-size: 19px; }
   .top .btn { font-size: 13px; }
-  #live-view, #incidents-view, #lab-view { padding: 12px; gap: 10px; }
-  #live-view:not(.is-snapshot) { grid-template-areas: "status" "chart" "feed" "inspector" "pipeline"; }
-  .telemetry-status { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; padding: 10px 0; }
-  .replay-metric { padding: 0 10px; }
-  .replay-metric:nth-child(3) { border-left: 0; }
+  #live-view, #incidents-view, #lab-view { padding: 0; gap: 10px; }
+  #live-view:not(.is-snapshot) { grid-template-areas: "chart" "feed" "inspector" "pipeline"; }
+  #card-chart { grid-template-columns: minmax(0, 1fr); }
+  .telemetry-status { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 10px; border-left: 0; border-top: 1px solid var(--line); gap: 6px; }
   .replay-metric strong { font-size: 14px; }
-  #chart { height: 180px; }
+  #chart { height: 146px; }
   #card-chart .hint { font-size: 12px; }
   #card-feed .telemetry-row { min-height: 44px; }
   #card-tracker { position: static; grid-column: 1; grid-row: auto; }
