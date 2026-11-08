@@ -126,13 +126,18 @@ function setupOverview() {
     $("workspace-title").focus({ preventScroll: true });
   });
   const cards = $("scenario-cards");
-  cards.innerHTML = Object.entries(scenarios).map(([name, description]) => `
-    <article class="scenario">
-      <h3>${name}</h3><p>${description}</p>
-      <button type="button" class="btn" aria-label="Explore sample: ${name}" aria-pressed="false" data-scenario="${name}">Explore sample</button>
-    </article>`).join("");
+  cards.innerHTML = Object.keys(scenarios).map((name) => `
+    <label class="scenario-option"><input type="radio" name="scenario" value="${name}" ${name === "Data Injection" ? "checked" : ""}><span>${name}</span></label>`).join("");
+  const selectedSample = () => cards.querySelector(":checked").value;
+  const describeSample = () => { $("scenario-description").textContent = scenarios[selectedSample()]; };
+  cards.addEventListener("change", describeSample);
+  describeSample();
   let cache;
   let selection = 0;
+  cards.addEventListener("change", () => {
+    selection++;
+    $("scenario-status").textContent = "";
+  });
   async function openSample(name, trigger) {
     const request = ++selection;
     $("scenario-status").textContent = "Loading cached scenario…";
@@ -144,9 +149,6 @@ function setupOverview() {
       const example = (await cache)[name];
       if (!example) throw new Error("Scenario unavailable");
       if (request !== selection) return;
-      cards.querySelectorAll("[data-scenario]").forEach((button) => {
-        button.setAttribute("aria-pressed", String(button.dataset.scenario === name));
-      });
       renderScenario(name, example);
       if (currentWorkspace === "overview" && document.activeElement === trigger) $("scenario-result").focus();
       $("scenario-status").textContent = "";
@@ -155,11 +157,7 @@ function setupOverview() {
       $("scenario-status").textContent = "This cached scenario couldn’t load. Try again or open the hosted demo.";
     }
   }
-  cards.addEventListener("click", (event) => {
-    const trigger = event.target.closest("[data-scenario]");
-    if (trigger) openSample(trigger.dataset.scenario, trigger);
-  });
-  $("try-sample").addEventListener("click", (event) => openSample("Data Injection", event.currentTarget));
+  $("try-sample").addEventListener("click", (event) => openSample(selectedSample(), event.currentTarget));
 }
 
 function fact(label, value) {
@@ -262,11 +260,14 @@ function setupStatic() {
   }
   $("t-features").innerHTML = Object.entries(featureGroups).filter(([, fields]) => fields.length)
     .map(([name, fields]) => `<fieldset class="feature-group"><legend>${name}</legend><div class="features">${fields.map((f) =>
-      `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" data-f="${esc(f)}"></label>`).join("")}</div></fieldset>`).join("");
+      `<label title="${esc(f)}">${esc(f)}<input type="number" step="any" id="feature-${esc(f)}" data-f="${esc(f)}"></label>`).join("")}</div></fieldset>`).join("");
   $("t-features").addEventListener("input", (e) => {
     if (e.target.dataset.f) {
       e.target.classList.toggle("changed", e.target.value === "" || Number(e.target.value) !== Number(e.target.dataset.orig));
       e.target.classList.remove("invalid");
+      e.target.removeAttribute("aria-invalid");
+      e.target.removeAttribute("aria-describedby");
+      e.target.parentElement.querySelector(".feature-error")?.remove();
       renderSampleState();
     }
   });
@@ -313,7 +314,12 @@ function setupStatic() {
     $("t-send").focus();
   });
   document.querySelectorAll("[name=t-mode]").forEach((radio) => {
-    radio.addEventListener("change", () => { $("t-burst").disabled = radio.value !== "burst"; });
+    radio.addEventListener("change", () => {
+      const burst = radio.value === "burst";
+      $("t-burst").disabled = !burst;
+      $("burst-count").hidden = !burst;
+      $("t-burst-range").hidden = !burst;
+    });
   });
   $("t-send").addEventListener("click", sendEntry);
   $("dr-close").addEventListener("click", () => closeDrawer());
@@ -458,8 +464,12 @@ function renderStats(s) {
   $("st-incidents").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rows").textContent = s.rows_total.toLocaleString();
   if (!S.evidence) $("chart-total").textContent = s.rows_total.toLocaleString();
+  const replayStatus = s.kafka_ok ? "Replay connected" : "Replay disconnected";
+  if ($("overview-session").textContent !== replayStatus) $("overview-session").textContent = replayStatus;
   $("replay-metrics").classList.toggle("is-stale", !s.kafka_ok);
-  $("overview-session").textContent = `${$("st-dataset").textContent} · ${s.rows_total.toLocaleString()} rows scored · ${s.rows_per_sec} rows/s`;
+  $("overview-dataset").textContent = $("st-dataset").textContent;
+  $("overview-total").textContent = $("pc-rows").textContent;
+  $("overview-rate").textContent = s.rows_per_sec + " rows/s";
   $("pc-inc").textContent = (s.counts.incidents_opened || 0).toLocaleString();
   $("pc-rep").textContent = (s.counts.reports_finished || 0).toLocaleString();
   renderPredictionMix(s.pred_counts || {});
@@ -923,6 +933,9 @@ async function loadSample() {
       input.value = String(values[index]);
       input.dataset.orig = input.value;
       input.classList.remove("changed", "invalid");
+      input.removeAttribute("aria-invalid");
+      input.removeAttribute("aria-describedby");
+      input.parentElement.querySelector(".feature-error")?.remove();
     });
     loadedSample = { requestedClass: c, quality: q, trueClass: sample.true_class };
     $("t-load-status").textContent = "Sample loaded.";
@@ -951,8 +964,9 @@ function renderSampleState() {
   $("t-send").disabled = runPending || sampleLoading || !sampleMatchesSelection();
   $("t-use-loaded").hidden = !loadedSample || sampleMatchesSelection();
   $("t-origin").textContent = loadedSample ? `Source sample: ${loadedSample.trueClass} · ${loadedSample.quality}` : "No sample loaded.";
+  const edited = editedFeatureCount();
   $("t-ground-truth").textContent = loadedSample
-    ? `Ground truth for this entry: ${editedFeatureCount() ? "unavailable after editing" : loadedSample.trueClass}`
+    ? (edited ? "Submitted entry: " + edited + " edited fields · Dataset ground truth unavailable" : "Submitted entry: dataset ground truth " + loadedSample.trueClass)
     : "";
 }
 
@@ -972,16 +986,23 @@ function startTracker(kind, ids, label, trueClass) {
   renderTracker();
 }
 
-// Clear the previous tracking the moment something new is sent, so stale
-// results never show for the new entry.
+// Keep the previous completed result separate from the active submission.
 function showSending(label) {
+  const tracker = S.tracker;
+  if (tracker && tracker.rows.size >= tracker.ids.size && (tracker.incidentId || tracker.decisions.size >= tracker.ids.size)) {
+    const previous = $("previous-run");
+    previous.innerHTML = "<details><summary>Previous run · " + esc(tracker.label) + "</summary>" + $("run-result").innerHTML + "</details>";
+    previous.hidden = false;
+  }
   S.tracker = null;
   $("tr-title").textContent = label;
   delete $("tracker").dataset.rendered;
   $("tracker-incident").hidden = true;
+  $("run-result").hidden = true;
+  $("run-result").textContent = "";
   $("tracker-announcement").textContent = "Sending telemetry.";
-  $("tracker").innerHTML = step("run", "Sent to Kafka", "sending…") + step("wait", "Detected", "") +
-    step("wait", "Incident", "") + step("wait", "AI report", "");
+  $("tracker").innerHTML = step("run", "Submitted", "sending…") + step("wait", "Scored", "") +
+    step("wait", "Incident", "") + step("wait", "Report", "");
 }
 
 function setRunPending(pending) {
@@ -991,7 +1012,7 @@ function setRunPending(pending) {
 }
 
 function showRunFailure(message) {
-  $("tracker").firstElementChild.outerHTML = step("err", "Submission failed", "Check the connection and try again.");
+  $("tracker").firstElementChild.outerHTML = step("err", "Submission failed", esc(message) + " Check the connection and try again.");
   $("tracker-announcement").textContent = "Submission failed.";
   toast(message, "error");
 }
@@ -1010,6 +1031,15 @@ async function sendEntry() {
     if (!isFinite(v)) {
       bad = true;
       inp.classList.add("invalid");
+      inp.setAttribute("aria-invalid", "true");
+      if (!inp.parentElement.querySelector(".feature-error")) {
+        const error = document.createElement("small");
+        error.className = "feature-error";
+        error.id = inp.id + "-error";
+        error.textContent = "Enter a number.";
+        inp.setAttribute("aria-describedby", error.id);
+        inp.after(error);
+      }
     } else {
       inp.classList.remove("invalid");
     }
@@ -1069,7 +1099,9 @@ async function launchAttack(c, btn) {
 }
 
 function step(state, title, body) {
-  return `<li class="${state}"><b>${title}</b><span>${body}</span></li>`;
+  const labels = { done: "Complete", run: "In progress", wait: "Waiting", no: "Skipped", err: "Failed" };
+  const status = labels[state] || "Unavailable";
+  return `<li class="${state}"><b>${title}</b><span class="step-status">${status}</span><span>${body}</span></li>`;
 }
 
 function renderTracker() {
@@ -1077,34 +1109,30 @@ function renderTracker() {
   if (!t) return;
   $("tr-title").textContent = t.label;
   const n = t.ids.size, got = t.rows.size;
-  const items = [step("done", "Sent to Kafka", `${n} entr${n > 1 ? "ies" : "y"} written to telemetry.raw`)];
+  const items = [step("done", "Submitted", `${n} entr${n > 1 ? "ies" : "y"} written to telemetry.raw`)];
 
   // 2. Detection
   if (!got) {
-    items.push(step("run", "Detected", "waiting for the detector…"));
+    items.push(step("run", "Scored", "waiting for the detector…"));
   } else if (n === 1) {
     const r = [...t.rows.values()][0];
-    const verdict = r.true_class ? (r.true_class === r.predicted_class ? " (matches the true class)" : ` (true class: ${esc(r.true_class)})`) : "";
-    items.push(step("done", "Detected", `${cls(r.predicted_class)} · confidence ${r.confidence.toFixed(3)} · ${Math.round(r.latency_ms)} ms after sending${verdict}`));
+    const latency = Number.isFinite(r.latency_ms) ? " · " + Math.round(r.latency_ms) + " ms latency" : "";
+    items.push(step("done", "Scored", "1 entry scored" + latency));
   } else {
-    const counts = {};
-    let conf = 0;
-    t.rows.forEach((r) => { counts[r.predicted_class] = (counts[r.predicted_class] || 0) + 1; conf += r.confidence; });
-    const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v}× ${cls(k)}`).join(", ");
-    items.push(step(got < n ? "run" : "done", "Detected", `${got}/${n} scored: ${parts} · mean confidence ${(conf / got).toFixed(2)}`));
+    items.push(step(got < n ? "run" : "done", "Scored", `${got} of ${n} entries scored`));
   }
 
   // 3. Incident
   const inc = t.incidentId ? S.incidents.get(t.incidentId) : null;
   const last = [...t.order].reverse().map((id) => t.decisions.get(id)).find(Boolean);
   if (inc) {
-    items.push(step("done", "Incident", `${cls(inc.attack_class)} · ${inc.status === "open" ? "open" : "closed"} · ${inc.row_count} rows`));
+    items.push(step("done", "Incident decision", `${cls(inc.attack_class)} · ${inc.status === "open" ? "open" : "closed"} · ${inc.row_count} rows`));
   } else if (last) {
     const finished = t.decisions.size >= n;
     const msg = finished
       ? ({ normal: "No incident: detected as Normal.", below_confidence: "No incident: below the confidence guard.", pending: "No incident: not enough attack rows in the window." }[last.decision] || "No incident.") + `<br><small>${esc(last.detail)}</small>`
       : esc(last.detail);
-    items.push(step(finished ? "no" : "run", "Incident", msg));
+    items.push(step(finished ? "no" : "run", "Incident decision", msg));
   } else {
     items.push(step(got ? "run" : "wait", "Incident", got ? "waiting for the incident manager…" : ""));
   }
@@ -1113,7 +1141,7 @@ function renderTracker() {
   const state = inc ? reportState(inc) : "wait";
   const reportStyle = { queued: "run", running: "run", ready: "done", error: "err", wait: "wait" };
   const progress = inc ? reportProgress(inc) : t.decisions.size >= n ? "No incident report for this run." : "";
-  items.push(step(reportStyle[state], "AI report", progress));
+  items.push(step(reportStyle[state], "Report", progress));
   const action = $("tracker-incident");
   action.hidden = !inc;
   if (inc) action.dataset.open = inc.incident_id;
@@ -1127,6 +1155,22 @@ function renderTracker() {
   const announcement = progress || (inc ? "Incident available." : got >= n ? "Telemetry scored." : "Waiting for scored telemetry.");
   const status = $("tracker-announcement");
   if (status.textContent !== announcement) status.textContent = announcement;
+
+  const result = $("run-result");
+  if (!got) return;
+  const rows = [...t.rows.values()];
+  const counts = new Map();
+  for (const row of rows) counts.set(row.predicted_class, (counts.get(row.predicted_class) || 0) + 1);
+  const prediction = n === 1 ? rows[0].predicted_class : [...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => count + " × " + name).join(" · ");
+  const confidence = n === 1 ? rows[0].confidence.toFixed(3) : (rows.reduce((sum, row) => sum + row.confidence, 0) / got).toFixed(3);
+  const summary = '<h3>Prediction and evidence</h3><dl class="result-facts">'
+    + fact(n === 1 ? "Predicted class" : "Predictions so far", prediction)
+    + fact(n === 1 ? "Model confidence" : "Mean model confidence", confidence)
+    + fact("Source", "Injected test")
+    + fact("Ground truth (dataset)", t.trueClass)
+    + '</dl>';
+  if (result.innerHTML !== summary) result.innerHTML = summary;
+  result.hidden = false;
 }
 
 function reportProgress(incident) {

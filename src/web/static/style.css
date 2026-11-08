@@ -383,11 +383,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .intro-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .scenarios, .methodology, .session-summary { padding: clamp(14px, 2vw, 24px); }
 .scenarios h2, .methodology h2, .session-summary h2 { font-size: 21px; }
-.scenario-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 172px), 1fr)); gap: 12px; margin-top: 16px; }
-.scenario { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
-.scenario h3, #scenario-result h3 { margin: 0; font-size: 16px; }
-.scenario p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
-.scenario button { align-self: start; margin-top: auto; min-height: 44px; font-size: 14px; }
 #scenario-result { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 #scenario-result details { padding: 10px 0; border-top: 1px solid var(--line); }
 #scenario-result summary { cursor: pointer; }
@@ -404,7 +399,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 
 .nav-section { margin: 14px 8px 0; color: var(--muted); font-size: 12px; font-weight: 600; }
 .workspace-nav a.btn { font-size: 14px; }
-.scenario button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .result-sections > section { border-top: 1px solid var(--line); padding: 12px 0; }
 .result-sections h4 { margin: 0 0 8px; font-size: 15px; }
 .result-sections p { margin: 6px 0; }
@@ -440,7 +434,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   .brand { padding-bottom: 4px; }
 
   .nav-section { display: none; }
-  .scenario-cards { grid-template-columns: 1fr; }
   .telemetry-columns { display: none; }
   .telemetry-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 8px; align-items: baseline; }
   .feed-prediction { grid-column: 1 / 3; font-weight: 600; }
@@ -531,13 +524,25 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 #overview-view { grid-template-columns: minmax(0, 1fr) minmax(195px, 26%); }
 #overview-view .intro { grid-column: 1; grid-row: 1; padding: 16px; }
 #overview-view .session-summary { grid-column: 2; grid-row: 1; align-self: stretch; }
-#overview-view .scenarios { grid-column: 1 / -1; grid-row: 2; }
+#overview-view .scenarios { grid-column: 1 / -1; }
+.scenario-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
+.scenario-cards { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.scenario-option { flex-direction: row; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.scenario-option:has(:checked) { background: var(--panel-2); color: var(--text); border-color: var(--accent); }
+.scenario-option input { accent-color: var(--accent); margin: 0; }
+#scenario-description { margin-bottom: var(--space-3); }
 .mobile-freshness { display: none; }
 .telemetry-status.is-stale .replay-metric:not(:has(#pill-kafka)) { color: var(--muted); }
 .telemetry-status.is-stale .replay-metric:first-child > span::after { content: " · Last received"; }
 .telemetry-row[aria-pressed="true"] { background: var(--panel-2); box-shadow: inset 2px 0 var(--accent); }
 .queue-filters summary { cursor: pointer; padding: var(--space-2); }
 .queue-filter-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.previous-run { margin-top: var(--space-3); border-top: 1px solid var(--line); padding-top: var(--space-2); }
+.previous-run summary { cursor: pointer; }
+.run-result { margin-top: var(--space-3); border-top: 1px solid var(--line); padding-top: var(--space-2); }
+.run-result h3, .previous-run h3 { font-size: 14px; margin: 0; }
+.feature-error { color: var(--bad-text); }
+.tracker li .step-status { font-size: 11px; font-weight: 650; }
 #method-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #method-view .methodology:last-child { grid-column: 1 / -1; }
 #method-view .agent-trace { grid-template-columns: 1fr; }
@@ -546,9 +551,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 @media (min-width: 901px) {
   #feed { max-height: 216px; overflow: auto; }
-  .scenario-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .scenario { padding: 10px; }
-  .scenario h3 { font-size: 14px; }
 }
 @media (max-width: 900px) {
   #live-view { grid-template-columns: minmax(0, 1fr); grid-template-areas: "chart" "inspector" "feed" "pipeline"; }
@@ -578,6 +580,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   #card-tracker { position: static; grid-column: 1; grid-row: auto; }
   #overview-view, #method-view { grid-template-columns: minmax(0, 1fr); }
   #overview-view .intro, #overview-view .scenarios, #overview-view .session-summary { grid-area: auto; }
-  #overview-view .scenarios { grid-row: 2; }
-  #overview-view .session-summary { grid-row: 3; }
+  #overview-view .session-summary { grid-row: auto; }
+  .scenario-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scenario-option { min-height: 44px; font-size: 13px; }
 }

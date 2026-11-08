@@ -31,21 +31,19 @@
   <main>
 <section class="grid intro-view" id="overview-view" aria-labelledby="show-overview">
   <div class="card intro">
-    <p class="dashboard-label">Featured cached scenario</p>
-    <h2>Explore a telemetry investigation</h2>
+    <div class="card-head"><h2 id="scenarios-heading">Start with a sample</h2><span class="badge">Cached examples · No key needed</span></div>
     <p>Follow a CubeSat telemetry sample from prediction to review.</p>
+    <fieldset class="scenario-picker"><legend class="sr-only">Sample class</legend><div id="scenario-cards" class="scenario-cards"></div></fieldset>
+    <p id="scenario-description" class="hint"></p>
     <div class="intro-actions">
-      <button class="btn primary" type="button" id="try-sample">Explore Data Injection sample</button>
+      <button class="btn primary" type="button" id="try-sample">Explore sample</button>
       <button class="btn ghost" type="button" data-view="live">Explore telemetry replay</button>
     </div>
-  </div>
-  <div class="card scenarios">
-    <div class="card-head"><h2 id="scenarios-heading" tabindex="-1">Sample scenarios</h2><span class="badge">Cached examples · No key needed</span></div>
-    <div id="scenario-cards" class="scenario-cards"></div>
     <p id="scenario-status" role="status" class="hint"></p>
-    <div id="scenario-result" tabindex="-1" hidden></div>
   </div>
-  <div class="card session-summary"><h2>Replay session</h2><p id="overview-session">Waiting for replay status.</p></div>
+  <div class="card scenarios" id="scenario-result" tabindex="-1" hidden>
+  </div>
+  <div class="card session-summary"><h2>Replay session</h2><p id="overview-session" role="status">Waiting for replay status.</p><dl class="inspector-facts"><div><dt>Dataset</dt><dd id="overview-dataset">–</dd></div><div><dt>Rows scored</dt><dd id="overview-total">–</dd></div><div><dt>Throughput</dt><dd id="overview-rate">–</dd></div></dl><button class="btn ghost" type="button" data-view="live">Open Telemetry</button></div>
 </section>
 
 <section class="grid intro-view" id="method-view" aria-labelledby="show-method" hidden>
@@ -219,8 +217,8 @@
     <div class="row send-row">
       <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
       <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst</label>
-      <label>Burst row count <input id="t-burst" type="number" min="2" max="50" step="1" value="10" required disabled aria-describedby="t-burst-range"></label>
-      <span class="hint" id="t-burst-range">2–50 rows</span>
+      <label id="burst-count" hidden>Burst row count <input id="t-burst" type="number" min="2" max="50" step="1" value="10" required disabled aria-describedby="t-burst-range"></label>
+      <span class="hint" id="t-burst-range" hidden>2–50 rows</span>
       <button class="btn primary" id="t-send" disabled>Send entry</button>
     </div>
     <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
@@ -231,12 +229,14 @@
     <p class="dashboard-label">Pipeline activity</p>
     <div class="card-head"><h2>Run progress</h2><small id="tr-title">No runs yet</small></div>
     <ol class="tracker" id="tracker">
-      <li class="wait"><b>Sent to Kafka</b><span>Send a telemetry entry or run a simulation</span></li>
-      <li class="wait"><b>Detected</b><span></span></li>
-      <li class="wait"><b>Incident</b><span></span></li>
-      <li class="wait"><b>AI report</b><span></span></li>
+      <li class="wait"><b>Submitted</b><span>Send a telemetry entry or run a simulation</span></li>
+      <li class="wait"><b>Scored</b><span></span></li>
+      <li class="wait"><b>Incident decision</b><span></span></li>
+      <li class="wait"><b>Report</b><span></span></li>
     </ol>
     <button type="button" class="btn" id="tracker-incident" hidden>Open incident</button>
+    <div id="run-result" class="run-result" hidden></div>
+    <div id="previous-run" class="previous-run" hidden></div>
     <p id="tracker-announcement" class="sr-only" role="status"></p>
   </section>
 
