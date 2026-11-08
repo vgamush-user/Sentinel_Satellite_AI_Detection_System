@@ -85,9 +85,9 @@ export const Incidents = memo(function Incidents({ hidden, incidents, classes, l
       <h3><i className={`status-mark ${status}`} aria-hidden="true" />{status === "open" ? "Open" : "Closed"} <span>{matches.length}</span></h3>
       {matches.map(i => <button key={i.incident_id} type="button" className="inc" data-id={i.incident_id}
         aria-pressed={selection?.id === i.incident_id} onClick={event => open(i.incident_id, event.currentTarget)}>
-        <span className="incident-name"><ClassLabel name={i.attack_class} /> <span className="m">{i.incident_id}</span></span>
-        <span className="incident-meta m">{fmtTime(i.opened_ts)} · {i.row_count ?? "–"} rows · {pct(i.peak_confidence)} peak</span>
-        <span><ReportBadge incident={i} /></span>
+        <span className="incident-name"><ClassLabel name={i.attack_class} /><span className="m incident-id">{i.incident_id}</span></span>
+        <span className="incident-meta m"><span>{fmtTime(i.opened_ts)}</span><span>{i.row_count ?? "–"} rows · {pct(i.peak_confidence)} peak</span></span>
+        <span className="incident-report"><ReportBadge incident={i} /></span>
       </button>)}
     </section> : null;
   });
@@ -106,7 +106,7 @@ export const Incidents = memo(function Incidents({ hidden, incidents, classes, l
   return (<section id="incidents-view" aria-labelledby="show-incidents" hidden={hidden} className={selection ? "has-detail" : undefined}>
   <section id="card-incidents" aria-labelledby="incidents-heading">
     <div className="incident-toolbar">
-      <div className="card-head"><h2 id="incidents-heading" tabIndex={-1}>Incident queue</h2></div>
+      <div className="card-head"><div><p className="dashboard-label">Investigation queue</p><h2 id="incidents-heading" tabIndex={-1}>Incident queue</h2></div></div>
       <label>Find incident <input id="incident-search" type="search" value={filters.search} onChange={change("search")} placeholder="ID or attack class" /></label>
       <details className="queue-filters"><summary>Filters <span id="filter-count">{applied ? `(${applied} applied)` : ""}</span></summary><div className="queue-filter-fields">
       <label>Attack class <select id="incident-class" value={filters.attack} onChange={change("attack")}><option value="">All classes</option>{classes.filter(name => name !== "Normal").map(name => <option key={name}>{name}</option>)}</select></label>

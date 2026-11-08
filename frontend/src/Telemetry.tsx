@@ -197,7 +197,7 @@ export function Telemetry({ hidden, recent, snapshot, setSnapshot, stats, stale,
     </div>
   <section className="card panel-console" id="card-chart">
     <header className="chart-console">
-      <p className="console-label">Scoring workspace</p>
+      <p className="console-label">{snapshot ? "Frozen evidence" : "Live scoring"}</p>
       <div className="console-heading"><h2 id="chart-heading" tabIndex={-1}>{snapshot ? "Telemetry snapshot" : "Threat score"}</h2><span className="console-tag" id="chart-mode">{snapshot ? "Snapshot" : "Live replay"}</span></div>
       <p className="console-source" id="chart-scope">{snapshot ? `${rows.length} captured rows · ${fmtTime(rows[0].ts, true)} to ${fmtTime(rows.at(-1)?.ts, true)}` : "Recent scored telemetry · up to 300 rows"}</p>
       <p className="console-source" id="chart-dataset" hidden={!!snapshot}>Replay dataset · <strong id="st-dataset">{stats ? datasetName(stats.replay_dataset) : "Unknown"}</strong></p>
