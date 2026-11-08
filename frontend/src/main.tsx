@@ -11,6 +11,14 @@ import { useReplay } from "./useReplay";
 import "../../src/web/static/style.css";
 
 const titles = { overview: "Overview", live: "Telemetry", incidents: "Incidents", lab: "Threat Lab", analysis: "Manual analysis", method: "How it works" };
+const descriptions: Record<keyof typeof titles, string> = {
+  overview: "Review replay health and explore cached scenarios.",
+  live: "Scan scored telemetry and inspect evidence windows.",
+  incidents: "Triage incidents and review the evidence behind each decision.",
+  lab: "Inject simulated telemetry and follow it through the detection pipeline.",
+  analysis: "Replay a CSV window for manual analysis or score a five-feature packet.",
+  method: "Understand what the detection and analysis workflows can tell you.",
+};
 type View = keyof typeof titles;
 const routes: Record<View, string> = { overview: "overview", live: "telemetry", incidents: "incidents", lab: "threat-lab", analysis: "manual-analysis", method: "how-it-works" };
 const readView = (): View => (Object.keys(routes) as View[]).find(view => "#" + routes[view] === location.hash) ?? "overview";
@@ -118,25 +126,35 @@ function App() {
   }, []);
   const removeToast = useCallback((id: number) => setNotifications(items => items.filter(item => item.id !== id)), []);
   return <><div className="dashboard-shell">
-<aside className="sidebar">
+<aside className="sidebar"><div className="sidebar-content">
   <div className="brand"><div className="logo" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="30" height="30"><circle cx="16" cy="16" r="5" fill="currentColor" /><ellipse cx="16" cy="16" rx="14" ry="6" fill="none" stroke="currentColor" strokeWidth="1.6" transform="rotate(-25 16 16)" /></svg>
     </div><div><strong>SentinelSat</strong><small>CubeSat telemetry security</small></div></div>
   <nav className="workspace-nav" aria-label="Dashboard views">
+    <span className="nav-section" aria-hidden="true">Operations</span>
     <button type="button" className="btn" id="show-overview" aria-controls="overview-view" aria-pressed={view === "overview"} onClick={() => navigate("overview", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="3" y="3" width="12" height="12" rx="2" /><path d="M3 7h12M7 7v8" /></svg>Overview</button>
     <button type="button" className="btn" id="show-live" aria-controls="live-view" aria-pressed={view === "live"} onClick={() => navigate("live", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9h3l2-5 3 10 2-5h4" /></svg>Telemetry</button>
     <button type="button" className="btn" id="show-incidents" aria-controls="incidents-view" aria-pressed={view === "incidents"} onClick={() => navigate("incidents", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h12M3 9h12M3 14h12" /><path d="M6 4h.01M6 9h.01M6 14h.01" /></svg>Incidents</button>
     <button type="button" className="btn" id="show-lab" aria-controls="lab-view" aria-pressed={view === "lab"} onClick={() => navigate("lab", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M7 2h4M8 2v5l-4 7a1 1 0 0 0 1 2h8a1 1 0 0 0 1-2l-4-7V2M6 11h6" /></svg>Threat Lab</button>
-    <span className="nav-section" aria-hidden="true">Learn</span>
+    <button type="button" className="btn" id="show-analysis" aria-controls="analysis-view" aria-pressed={view === "analysis"} onClick={() => navigate("analysis", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 3h10v12H4zM6 7h6M6 10h6"/></svg>Manual analysis</button>
+    <span className="nav-section" aria-hidden="true">Reference</span>
     <button type="button" className="btn" id="show-method" aria-controls="method-view" aria-pressed={view === "method"} onClick={() => navigate("method", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="9" cy="9" r="6" /><path d="M9 8v4M9 5.5v1" /></svg>How it works</button>
-    <button type="button" className="btn" id="show-analysis" aria-controls="analysis-view" aria-pressed={view === "analysis"} onClick={() => navigate("analysis", "workspace-title")}>Manual analysis</button>
   </nav>
-</aside>
+</div></aside>
 
 <div className="workspace">
   <header className="top">
-    <h1 id="workspace-title" tabIndex={-1}>{titles[view]}</h1>
-    <button className="btn ghost" id="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>Dark theme</button>
+    <div className="workspace-heading">
+      <p className="dashboard-label">{view === "method" ? "Reference" : "Mission operations"}</p>
+      <h1 id="workspace-title" tabIndex={-1}>{titles[view]}</h1>
+      <p className="workspace-description">{descriptions[view]}</p>
+    </div>
+    <div className="workspace-actions">
+      <span className="connection-label" role="status"><i className={`dot${!stale && data?.stats.kafka_ok ? " online" : ""}${!error && (stale || loading) ? " pending" : ""}`} aria-hidden="true" />
+        {stale ? "Kafka replay reconnecting" : error ? "Kafka replay unavailable" : loading ? "Connecting to Kafka replay" : data?.stats.kafka_ok ? "Kafka replay connected" : "Kafka replay disconnected"}
+      </span>
+      <button className="btn ghost" id="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>Dark theme</button>
+    </div>
   </header>
   <main>
     <div className="card replay-notice" id="replay-notice" hidden={!error}><p id="replay-notice-text" role="status">Replay is unavailable. Cached samples can still be explored.</p><button className="btn" id="retry-replay" disabled={loading} onClick={retry} type="button">Retry connection</button></div>
