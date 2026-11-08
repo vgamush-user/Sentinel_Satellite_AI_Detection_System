@@ -238,7 +238,7 @@ export const SAMPLE_INPUTS: SampleInput[] = [
 function buildReport(inc: Incident, readings: Map<string, Reading>) {
   const rs = inc.readingIds.map((id) => readings.get(id)).filter(Boolean) as Reading[];
   const name = CLASS_LABEL[inc.cls];
-  const dur = Math.round(((inc.closedAt ?? inc.lastSeen) - inc.firstSeen) / 1000);
+  const dur = Math.round(((inc.closedAt ?? inc.lastSeen ?? 0) - (inc.firstSeen ?? 0)) / 1000);
   const trig = inc.triggerReadingIds.join(', ');
   const key = inc.cls === 'jamming' ? 'rf_snr' : inc.cls === 'spoofing' ? 'gyro_rate' : 'cmd_rate';
   const vals = rs.map((r) => r.features[key]).filter((v): v is number => v != null);
@@ -336,7 +336,7 @@ export class SampleSource {
         act.readingIds.push(r.id);
         act.lastSeen = r.ts;
         this.nominalRun = 0;
-        if (r.confidence > act.peakConfidence) {
+        if (act.peakConfidence == null || r.confidence > act.peakConfidence) {
           act.peakConfidence = r.confidence;
         }
         this.mark(r, `Attached to ${act.id}: ${CLASS_LABEL[r.predicted]} at ${fmtConf(r.confidence)} while the incident was open.`, act.id);

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQueryState } from '@/hooks/use-query-state';
+import { resolveReading } from '@/lib/sentinel/evidence';
+import { chronological } from '@/lib/sentinel/chart-model';
 import { Link, useLocation, useParams, useSearch } from 'wouter';
 import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, ArrowUpRight, CircleAlert, CircleDashed, FileText, Loader2, RotateCcw } from 'lucide-react';
@@ -33,10 +36,10 @@ function ReportSection({ inc }: { inc: Incident }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const r = inc.report;
-  if (r.status === 'unavailable')
-    return <Empty icon={CircleDashed} title="Report not yet available" body="Reports are generated after an incident closes. This incident is still open and collecting evidence." />;
+  if (r.status === 'unavailable' || r.status === 'unknown')
+    return <Empty icon={CircleDashed} title="Report unavailable" body={inc.lifecycle === 'open' ? 'This incident is open. The source has not supplied a report.' : 'The source has not supplied an available report for this incident.'} />;
   if (r.status === 'pending')
-    return <Empty icon={Loader2} title="Report generation pending" body={`Requested at ${r.requestedAt ? fmtTime(r.requestedAt) : '—'} UTC. Timeline and evidence are already complete. The report advances with replay playback.`} />;
+    return <Empty icon={Loader2} title="Report generation pending" body={`Requested at ${r.requestedAt ? fmtTime(r.requestedAt) : '—'} UTC. ${client ? 'Generation is managed by the backend; updates arrive with the connection.' : 'The report advances with sample replay playback.'}`} />;
   if (r.status === 'failed')
     return (
       <div className="space-y-3 p-5">
@@ -88,12 +91,14 @@ export default function IncidentDetail() {
   const s = useSentinel();
   const [, navigate] = useLocation();
   const search = new URLSearchParams(useSearch());
-  const atParam = Number(search.get('at')) || null;
+  const parsedAt = Number(search.get('at'));
+  const atParam = Number.isFinite(parsedAt) && parsedAt > 0 ? parsedAt : null;
   const fromReading = search.get('reading');
-  const [tab, setTab] = useState(fromReading ? 'readings' : 'timeline');
+  const [tab, setTab] = useQueryState('tab', fromReading ? 'readings' : 'timeline', v => ['timeline','readings','sparta','report'].includes(v));
   const [inspect, setInspect] = useState<Reading | null>(null);
   const inc = s.incidents.find((i) => i.id === id) as Ext | undefined;
-  const { client } = useBackend();
+  const backend = useBackend();
+  const { client } = backend;
   const [detail, setDetail] = useState<{ busy: boolean; err: string | null }>({ busy: false, err: null });
   useEffect(() => {
     if (!client || !id) return;
@@ -107,9 +112,15 @@ export default function IncidentDetail() {
       live = false;
     };
   }, [client, id]);
-  const [featureKey, setFeatureKey] = useState<string | null>(null);
+  const [featureKey, setFeatureKey] = useQueryState('channel', '');
 
-  const readings = useMemo(() => (inc ? inc.readingIds.map((rid) => s.readingIndex.get(rid)).filter((r): r is Reading => !!r) : []), [inc, s.readingIndex]);
+  useEffect(() => { setInspect(null); }, [id, s.epoch]);
+  const evidenceIds = useMemo(() => inc ? [...new Set([...inc.triggerReadingIds, ...inc.readingIds,
+    ...[...s.evidence.values()].filter(r => r.incidentId === inc.id).map(r => r.id),
+    ...[...backend.evidence.keys()].filter(rid => resolveReading(rid, s, backend)?.incidentId === inc.id),
+  ])] : [], [inc, s.evidence, backend.evidence, backend.evidenceDecisions]);
+  const readings = useMemo(() => chronological(evidenceIds.map(rid => resolveReading(rid, s, backend)).filter((r): r is Reading => !!r)), [evidenceIds, s.readingIndex, s.evidence, backend.evidence, backend.evidenceDecisions]);
+  const missingIds = evidenceIds.filter(rid => !resolveReading(rid, s, backend));
 
   if (s.status === 'loading')
     return (
@@ -139,26 +150,27 @@ export default function IncidentDetail() {
     );
 
   const features = s.config?.features ?? [];
-  const feature = features.find((f) => f.key === (featureKey ?? KEY_FEATURE[inc.cls])) ?? features[0];
+  const feature = features.find((f) => f.key === (featureKey || KEY_FEATURE[inc.cls])) ?? features[0];
   const keyFeature = features.find((f) => f.key === KEY_FEATURE[inc.cls]) ?? features[0];
   const sparta = inc.sparta ?? [];
   const mitigations = inc.mitigations ?? [];
-  const endTs = inc.closedAt ?? inc.lastSeen;
-  const range: [number, number] = [inc.firstSeen - 45_000, endTs + 30_000];
-  const latestTs = s.readings[s.readings.length - 1]?.ts ?? endTs;
-  if (range[1] > latestTs) range[1] = Math.max(latestTs, inc.lastSeen + 5000);
+  const startTs = inc.firstSeen ?? readings[0]?.ts;
+  const endTs = inc.closedAt ?? inc.lastSeen ?? readings[readings.length - 1]?.ts;
+  const hasTime = startTs != null && endTs != null;
+  const range: [number, number] = [(startTs ?? 0) - 45_000, (endTs ?? 0) + 30_000];
   const ctx = atParam ?? inc.firstSeen;
-  const missing = inc.readingIds.length - readings.length;
+  const missing = missingIds.length;
+  const chartReadings = chronological([...new Map([...s.readings, ...readings].map(r => [r.id, r])).values()]);
 
   return (
-    <div className="animate-in fade-in-0 duration-150">
+    <div className="">
       <Link href="/incidents" className="mb-3 inline-flex items-center gap-1 text-[12.5px] text-ink-3 hover:text-ink" data-testid="link-back-incidents">
         <ArrowLeft className="size-3.5" aria-hidden /> Incidents
       </Link>
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-[26px] font-medium tracking-[-0.01em] text-ink md:text-[30px]" data-testid="text-incident-id">
+            <h1 className="break-all font-mono text-[26px] font-medium tracking-[-0.01em] text-ink md:text-[30px]" data-testid="text-incident-id">
               {inc.id}
             </h1>
             <LifecycleBadge lifecycle={inc.lifecycle} />
@@ -169,7 +181,7 @@ export default function IncidentDetail() {
             {inc.closedAt ? (
               <>
                 {' '}
-                · closed <span className="tnum text-ink">{fmtTime(inc.closedAt)} UTC</span> after {fmtDuration(inc.closedAt - inc.firstSeen)}
+                · closed <span className="tnum text-ink">{fmtTime(inc.closedAt)} UTC</span> {inc.firstSeen != null && <>after {fmtDuration(inc.closedAt - inc.firstSeen)}</>}
               </>
             ) : (
               <> · still open, last seen {fmtTime(inc.lastSeen)} UTC</>
@@ -218,7 +230,7 @@ export default function IncidentDetail() {
           <ErrorNote>Stored detail could not be merged: {detail.err}. Showing streamed state.</ErrorNote>
         </div>
       )}
-      {feature ? (
+      {feature && hasTime ? (
       <Panel className="mb-5">
         <PanelHead title="Evidence window" meta={<span className="tnum">{fmtTime(range[0])} – {fmtTime(range[1])} UTC · dashed line marks the selected time context</span>}>
           <NativeSelect label="Channel" value={feature.key} onChange={(e) => setFeatureKey(e.target.value)} data-testid="select-incident-channel">
@@ -232,7 +244,7 @@ export default function IncidentDetail() {
         <div className="px-2 pt-3 pb-2 md:px-3">
           <TelemetryChart
             label={`${feature.label} around ${inc.id}`}
-            readings={s.readings}
+            readings={chartReadings}
             feature={feature}
             incidents={s.incidents}
             range={range}
@@ -241,7 +253,7 @@ export default function IncidentDetail() {
             threshold={s.config!.threshold}
             height={220}
             onSelectReading={setInspect}
-            onSelectIncident={(i) => i.id !== inc.id && navigate(`/incidents/${i.id}?at=${i.firstSeen}`)}
+            onSelectIncident={(i) => i.id !== inc.id && navigate(`/incidents/${encodeURIComponent(i.id)}?at=${i.firstSeen}`)}
           />
         </div>
         <div className="border-t border-divider px-4 py-2.5 md:px-5">
@@ -250,7 +262,7 @@ export default function IncidentDetail() {
       </Panel>
       ) : (
         <Panel className="mb-5">
-          <Empty icon={CircleDashed} title="No telemetry channels available" body="The source configuration did not provide feature channels for this incident's evidence chart." />
+          <Empty icon={CircleDashed} title="Evidence chart unavailable" body="The source has not supplied a channel and valid time bounds for this evidence window." />
         </Panel>
       )}
 
@@ -288,14 +300,16 @@ export default function IncidentDetail() {
                     {e.label}
                     {e.readingId && (
                       <button
-                        className="ml-2 font-mono text-[12px] text-lav hover:underline"
+                        disabled={!resolveReading(e.readingId!, s, backend)}
+                         title={!resolveReading(e.readingId!, s, backend) ? 'Unavailable in client history' : undefined}
+                         className="ml-2 font-mono text-[12px] text-lav hover:underline disabled:text-ink-3"
                         onClick={() => {
-                          const r = s.readingIndex.get(e.readingId!);
+                          const r = resolveReading(e.readingId!, s, backend);
                           if (r) setInspect(r);
                         }}
                         data-testid={`button-timeline-reading-${i}`}
                       >
-                        {e.readingId}
+                        {e.readingId}{!resolveReading(e.readingId!, s, backend) && ' (unavailable in client history)'}
                       </button>
                     )}
                   </span>
@@ -307,7 +321,7 @@ export default function IncidentDetail() {
 
         <Tabs.Content value="readings" className="focus-visible:outline-none">
           <Panel>
-            <PanelHead title="Trigger and attached readings" meta={`${inc.triggerReadingIds.length} trigger readings opened the incident; ${inc.readingIds.length - inc.triggerReadingIds.length} more were attached while open.${missing ? ` ${missing} have left the client window.` : ''}`} />
+            <PanelHead title="Trigger and attached readings" meta={`${inc.triggerReadingIds.length} trigger readings opened the incident; ${Math.max(0, evidenceIds.length - inc.triggerReadingIds.length)} additional known reading IDs.${missing ? ` ${missing} are unavailable in client history.` : ''}`} />
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-[13px]">
                 <thead>
@@ -322,6 +336,7 @@ export default function IncidentDetail() {
                   </tr>
                 </thead>
                 <tbody>
+                  {missingIds.map(rid => <tr key={rid}><td className="px-5 py-2" colSpan={7}><span className="font-mono">{rid}</span> � unavailable in client history</td></tr>)}
                   {readings.map((r) => {
                     const trig = inc.triggerReadingIds.includes(r.id);
                     return (
@@ -339,7 +354,7 @@ export default function IncidentDetail() {
                         <td className="px-3 py-2 text-right tnum">{fmtConf(r.confidence)}</td>
                         <td className="px-3 py-2 text-right tnum">{keyFeature ? fmtValue(r.features[keyFeature.key], keyFeature) : '—'}</td>
                         <td className="px-5 py-2">
-                          <Link href={`/telemetry?reading=${r.id}&at=${r.ts}`} className="inline-flex items-center gap-1 text-[12.5px] text-lav hover:underline">
+                          <Link href={`/telemetry?reading=${encodeURIComponent(r.id)}&at=${r.ts}`} className="inline-flex items-center gap-1 text-[12.5px] text-lav hover:underline">
                             Telemetry <ArrowUpRight className="size-3" aria-hidden />
                           </Link>
                         </td>
@@ -437,7 +452,7 @@ export default function IncidentDetail() {
         </Tabs.Content>
       </Tabs.Root>
 
-      <ReadingInspector reading={inspect ? s.readingIndex.get(inspect.id) ?? inspect : null} open={!!inspect} onOpenChange={(o) => !o && setInspect(null)} onNavigate={setInspect} />
+      <ReadingInspector navigationReadings={readings} reading={inspect ? resolveReading(inspect.id, s, backend) ?? inspect : null} open={!!inspect} onOpenChange={(o) => !o && setInspect(null)} onNavigate={setInspect} />
     </div>
   );
 }

@@ -11,13 +11,13 @@ export function isNominal(value: string) {
   return value === 'nominal' || value.toLowerCase() === 'normal';
 }
 
-export function fmtTime(ts: number) {
-  if (!Number.isFinite(ts) || ts <= 0) return '—';
+export function fmtTime(ts: number | null | undefined) {
+  if (ts == null || !Number.isFinite(ts) || ts <= 0) return '—';
   return new Date(ts).toISOString().slice(11, 19);
 }
 
-export function fmtDateTime(ts: number) {
-  if (!Number.isFinite(ts) || ts <= 0) return 'Unavailable';
+export function fmtDateTime(ts: number | null | undefined) {
+  if (ts == null || !Number.isFinite(ts) || ts <= 0) return 'Unavailable';
   const iso = new Date(ts).toISOString();
   return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
 }

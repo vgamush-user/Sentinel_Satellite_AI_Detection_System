@@ -1,8 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createAdapter, type SentinelAdapter } from './adapter';
 import type { AdapterEvent, AttackAck, ConnectionState, Incident, Playback, Reading, SourceConfig, StateSnapshot, Stats } from './types';
+import { OperationsProvider } from './operations';
 
 export interface ClientState {
+  epoch: number;
+  evidence: Map<string, Reading>;
   status: 'loading' | 'ready' | 'error';
   error?: string;
   connection: ConnectionState;
@@ -18,8 +21,10 @@ export interface ClientState {
   runs: AttackAck[];
 }
 
-class Store {
+export class Store {
   state: ClientState = {
+    epoch: 0,
+    evidence: new Map(),
     status: 'loading',
     connection: 'connecting',
     config: null,
@@ -33,6 +38,7 @@ class Store {
     runs: [],
   };
   private subs = new Set<() => void>();
+  private initGeneration = 0;
   constructor(public adapter: SentinelAdapter) {}
 
   subscribe = (fn: () => void) => {
@@ -68,7 +74,15 @@ class Store {
   private mergeIncidents(incoming: Incident[]) {
     const m = new Map(this.state.incidents.map((i) => [i.id, i]));
     for (const i of incoming) m.set(i.id, i);
-    return [...m.values()].sort((a, b) => a.firstSeen - b.firstSeen || a.id.localeCompare(b.id));
+    return [...m.values()].sort((a, b) => (a.firstSeen ?? Infinity) - (b.firstSeen ?? Infinity) || a.id.localeCompare(b.id));
+  }
+
+  private retain(readings: Reading[]) {
+    const evidence = new Map(this.state.evidence);
+    const tracked = new Set(this.state.runs.flatMap(run => run.readingIds));
+    for (const reading of readings) if (tracked.has(reading.id)) evidence.set(reading.id, reading);
+    while (evidence.size > 1000) evidence.delete(evidence.keys().next().value!);
+    return evidence;
   }
 
   private applySnapshot(s: StateSnapshot, resync: boolean) {
@@ -81,6 +95,7 @@ class Store {
       config: s.config,
       readings: list,
       readingIndex: index,
+      evidence: this.retain(s.readings),
       incidents,
       stats: s.stats,
       playback: s.playback,
@@ -93,7 +108,7 @@ class Store {
     switch (e.type) {
       case 'readings': {
         const { list, index, added } = this.mergeReadings(e.readings);
-        this.set({ readings: list, readingIndex: index, lastReceivedAt: added > 0 ? Date.now() : this.state.lastReceivedAt });
+        this.set({ readings: list, readingIndex: index, evidence: this.retain(e.readings), lastReceivedAt: added > 0 ? Date.now() : this.state.lastReceivedAt });
         break;
       }
       case 'incidents':
@@ -111,6 +126,14 @@ class Store {
       case 'resync':
         this.applySnapshot(e.snapshot, true);
         break;
+      case 'reset': {
+        this.initGeneration++;
+        const s = e.snapshot;
+        this.set({ ...s, epoch: this.state.epoch + 1, status: 'ready', error: undefined,
+          connection: 'connected', readingIndex: new Map(s.readings.map(r => [r.id, r])),
+          evidence: new Map(), runs: [], lastResync: null, lastReceivedAt: s.readings.length ? Date.now() : null });
+        break;
+      }
       case 'runs':
         this.set({ runs: e.runs });
         break;
@@ -118,12 +141,16 @@ class Store {
   };
 
   async init() {
+    const generation = ++this.initGeneration;
     try {
       this.set({ connection: 'connecting', status: 'loading' });
       const s = await this.adapter.getState();
+      if (generation !== this.initGeneration) return;
       this.applySnapshot(s, false);
-      this.set({ connection: this.adapter.mode === 'sample' ? 'connected' : this.state.connection, runs: this.adapter.getRuns() });
+      this.set({ connection: this.adapter.mode === 'sample' ? 'connected' : this.state.connection, runs: this.adapter.getRuns(),
+        evidence: new Map((this.adapter.getEvidence?.() ?? []).map(r => [r.id, r])) });
     } catch (err) {
+      if (generation !== this.initGeneration) return;
       this.set({ status: 'error', error: err instanceof Error ? err.message : 'Failed to load state' });
     }
   }
@@ -140,7 +167,7 @@ export function SentinelProvider({ children, adapter }: { children: ReactNode; a
       unsub();
     };
   }, [store]);
-  return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={store}><OperationsProvider>{children}</OperationsProvider></Ctx.Provider>;
 }
 
 function useStore() {

@@ -32,8 +32,8 @@ export interface Reading {
   raw?: unknown;
 }
 
-export type Lifecycle = 'open' | 'closed';
-export type ReportStatus = 'unavailable' | 'pending' | 'ready' | 'failed';
+export type Lifecycle = 'open' | 'closed' | 'unknown';
+export type ReportStatus = 'unavailable' | 'pending' | 'ready' | 'failed' | 'unknown';
 
 export interface IncidentEvent {
   ts: number;
@@ -44,6 +44,7 @@ export interface IncidentEvent {
 
 export interface IncidentReport {
   status: ReportStatus;
+  rawStatus?: string;
   mode?: 'template' | 'cached' | 'live';
   requestedAt?: number;
   generatedAt?: number;
@@ -63,12 +64,12 @@ export interface Incident {
   id: string;
   cls: AttackClass;
   lifecycle: Lifecycle;
-  firstSeen: number;
-  lastSeen: number;
+  firstSeen: number | null;
+  lastSeen: number | null;
   closedAt?: number;
   readingIds: string[];
   triggerReadingIds: string[];
-  peakConfidence: number;
+  peakConfidence: number | null;
   origin: ReadingSource;
   runId?: string;
   timeline: IncidentEvent[];
@@ -108,6 +109,8 @@ export interface Stats {
 }
 
 export interface SourceConfig {
+  sampleSessionId?: string;
+  recoveryNotice?: string;
   features: FeatureDef[];
   classes: ClassLabel[];
   threshold: number;
@@ -192,6 +195,7 @@ export type AdapterEvent =
   | { type: 'playback'; playback: Playback }
   | { type: 'connection'; state: ConnectionState }
   | { type: 'resync'; snapshot: StateSnapshot }
+  | { type: 'reset'; snapshot: StateSnapshot }
   | { type: 'runs'; runs: AttackAck[] };
 
 export type ReplayAction = { action: 'play' } | { action: 'pause' } | { action: 'step'; count: number } | { action: 'speed'; speed: 1 | 2 | 5 };

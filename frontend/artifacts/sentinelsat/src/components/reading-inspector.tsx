@@ -12,16 +12,18 @@ interface Props {
   onOpenChange: (o: boolean) => void;
   onNavigate?: (r: Reading) => void;
   showTelemetryLink?: boolean;
+  navigationReadings?: Reading[];
 }
 
-export function ReadingInspector({ reading, open, onOpenChange, onNavigate, showTelemetryLink = true }: Props) {
+export function ReadingInspector({ reading, open, onOpenChange, onNavigate, showTelemetryLink = true, navigationReadings }: Props) {
   const s = useSentinel();
   const features = s.config?.features ?? [];
   const threshold = s.config?.threshold ?? 0.7;
-  const idx = reading ? s.readings.findIndex((r) => r.id === reading.id) : -1;
-  const prev = idx > 0 ? s.readings[idx - 1] : null;
-  const next = idx >= 0 && idx < s.readings.length - 1 ? s.readings[idx + 1] : null;
-  const evicted = reading && idx < 0;
+  const sequence = navigationReadings ?? s.readings;
+  const idx = reading ? sequence.findIndex((r) => r.id === reading.id) : -1;
+  const prev = idx > 0 ? sequence[idx - 1] : null;
+  const next = idx >= 0 && idx < sequence.length - 1 ? sequence[idx + 1] : null;
+  const evicted = reading && !s.readingIndex.has(reading.id);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -66,7 +68,7 @@ export function ReadingInspector({ reading, open, onOpenChange, onNavigate, show
                       <span className="text-amber">
                         Threat Lab simulation <span className="font-mono text-[12px]">{reading.runId}</span>
                       </span>
-                    ) : reading.originalSource ? (
+                    ) : s.config?.mode === 'connected' ? (
                       <span>Backend replay</span>
                     ) : (
                       'Downlink (sample replay)'
@@ -109,7 +111,7 @@ export function ReadingInspector({ reading, open, onOpenChange, onNavigate, show
                 <h3 className="mt-5 mb-2 text-[13px] font-semibold text-ink">Incident association</h3>
                 <div className="rounded-[8px] border border-divider bg-panel px-3 py-2.5 text-[13px]">
                   {reading.incidentId ? (
-                    <Link href={`/incidents/${reading.incidentId}?at=${reading.ts}&reading=${reading.id}`} className="inline-flex items-center gap-1 font-mono text-rose hover:underline" data-testid="link-inspector-incident">
+                    <Link href={`/incidents/${encodeURIComponent(reading.incidentId)}?at=${reading.ts}&reading=${encodeURIComponent(reading.id)}`} className="inline-flex items-center gap-1 font-mono text-rose hover:underline" data-testid="link-inspector-incident">
                       {reading.incidentId} <ArrowUpRight className="size-3.5" aria-hidden />
                     </Link>
                   ) : (
@@ -166,7 +168,7 @@ export function ReadingInspector({ reading, open, onOpenChange, onNavigate, show
               </div>
               {showTelemetryLink && (
                 <div className="border-t border-divider px-5 py-3">
-                  <Link href={`/telemetry?reading=${reading.id}&at=${reading.ts}`} className="inline-flex items-center gap-1 text-[13px] text-lav hover:underline" data-testid="link-inspector-telemetry">
+                  <Link href={`/telemetry?reading=${encodeURIComponent(reading.id)}&at=${reading.ts}`} className="inline-flex items-center gap-1 text-[13px] text-lav hover:underline" data-testid="link-inspector-telemetry">
                     Open in Telemetry at {fmtDateTime(reading.ts).slice(11)} <ArrowUpRight className="size-3.5" aria-hidden />
                   </Link>
                 </div>

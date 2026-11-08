@@ -17,27 +17,30 @@ interface FormVals {
 
 function RunOutcome({ run }: { run: AttackAck }) {
   const s = useSentinel();
-  const arrived = run.readingIds.map((id) => s.readingIndex.get(id)).filter(Boolean);
+  const reading = (id: string) => s.readingIndex.get(id) ?? s.evidence.get(id);
+  const arrived = run.readingIds.map(reading).filter(Boolean);
   const incidents = s.incidents.filter((i) => i.runId === run.runId);
   const done = arrived.length === run.readingIds.length;
+  const expired = !done && !!s.playback && s.playback.cursorSeq > run.scheduledToSeq && s.connection === 'connected';
   const flagged = arrived.filter((r) => !isNominal(r!.predicted)).length;
   const steps = [
     { ok: true, title: 'Request accepted', body: <>Accepted at <span className="tnum">{fmtTime(run.acceptedAt)} UTC</span>. Acceptance means readings were scheduled, not that anything was detected.</> },
     {
       ok: done,
-      pending: !done,
-      title: done ? 'Readings classified' : 'Waiting for readings',
+      pending: !done && !expired,
+      title: done ? 'Readings classified' : expired ? 'Some evidence is no longer retained' : 'Waiting for readings',
       body: (
         <>
           {arrived.length} of {run.readingIds.length} scheduled readings received
           {arrived.length > 0 && <>, {flagged} classified non-nominal</>}.
           {!done && s.playback && !s.playback.playing && <span className="text-amber"> Replay is paused; injected readings arrive when playback resumes.</span>}
+          {expired && <span> The run is in the past. Missing evidence is unavailable, not waiting to arrive. The latest 1,000 submitted readings are retained.</span>}
         </>
       ),
     },
     incidents.length
       ? { ok: true, title: 'Incident opened', tone: 'rose', body: <>Detection crossed the 3-reading rule: {incidents.map((i) => <Link key={i.id} href={`/incidents/${i.id}?at=${i.firstSeen}`} className="font-mono text-rose hover:underline">{i.id}</Link>)}</> }
-      : { ok: done, pending: !done, title: done ? 'No incident opened' : 'Incident outcome pending', tone: done ? 'mint' : undefined, body: done ? 'Readings were classified and logged, but the detector did not escalate them. Open any reading to see its entry decision.' : 'Determined once all readings are classified.' },
+      : { ok: done, pending: !done && !expired, title: done ? 'No incident opened' : expired ? 'Incident outcome unavailable' : 'Incident outcome pending', tone: done ? 'mint' : undefined, body: done ? 'Readings were classified and logged, but the detector did not escalate them. Open any reading to see its entry decision.' : expired ? 'No associated incident is retained for this run.' : 'Determined once all readings are classified.' },
   ];
   return (
     <div className="space-y-4">
@@ -66,7 +69,7 @@ function RunOutcome({ run }: { run: AttackAck }) {
           </thead>
           <tbody>
             {run.readingIds.map((id) => {
-              const r = s.readingIndex.get(id);
+              const r = reading(id);
               return (
                 <tr key={id} className="border-b border-divider/60 last:border-0">
                   <td className="px-3 py-1.5">
@@ -78,7 +81,7 @@ function RunOutcome({ run }: { run: AttackAck }) {
                       <span className="font-mono text-ink-3">{id}</span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5">{r ? <ClassTag cls={r.predicted} /> : <span className="text-ink-3">Not yet received</span>}</td>
+                  <td className="px-3 py-1.5">{r ? <ClassTag cls={r.predicted} /> : <span className="text-ink-3">{expired ? 'Evidence unavailable' : 'Not yet received'}</span>}</td>
                   <td className="px-3 py-1.5 text-right tnum">{r ? fmtConf(r.confidence) : '—'}</td>
                   <td className="px-3 py-1.5">{r?.incidentId ? <Link href={`/incidents/${r.incidentId}?at=${r.ts}&reading=${id}`} className="font-mono text-rose hover:underline">{r.incidentId}</Link> : <span className="text-ink-3">—</span>}</td>
                 </tr>
@@ -132,7 +135,7 @@ export default function ThreatLab() {
   const { client } = useBackend();
   if (client)
     return (
-      <div className="animate-in fade-in-0 duration-150">
+      <div>
         <PageHeader title="Threat Lab" subtitle="Send labeled attack simulations or custom entries to the connected backend, then trace scoring, incident decisions and reports." />
         <BackendLab />
       </div>
@@ -150,7 +153,7 @@ export default function ThreatLab() {
   });
 
   return (
-    <div className="animate-in fade-in-0 duration-150">
+    <div>
       <PageHeader
         title="Threat Lab"
         subtitle={

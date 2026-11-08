@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQueryState } from '@/hooks/use-query-state';
+import { chronological } from '@/lib/sentinel/chart-model';
 import { Link, useLocation, useSearch } from 'wouter';
 import { Activity, ArrowRight, CircleCheck, Crosshair, Database, Radio, ShieldAlert, Timer } from 'lucide-react';
 import { Btn, ClassTag, Empty, ErrorNote, Field, LifecycleBadge, NativeSelect, PageHeader, Panel, PanelHead, PredictionCell, ReportBadge, Segmented, Skel } from '@/components/kit';
@@ -21,7 +23,7 @@ const TONES = {
 function Metric({ label, value, unit, scope, note, testid, tone, icon: Icon }: { label: string; value: string | null; unit?: string; scope: 'Cumulative' | 'Current'; note: string; testid: string; tone: keyof typeof TONES; icon: typeof Activity }) {
   const t = TONES[tone];
   return (
-    <div className={`lift relative min-w-0 overflow-hidden rounded-[18px] border px-4 py-4 md:px-5 ${t.card}`}>
+    <div className={`relative min-w-0 overflow-hidden rounded-[18px] border px-4 py-4 md:px-5 ${t.card}`}>
       <span aria-hidden className={`absolute -right-6 -top-6 size-20 rounded-full opacity-40 ${t.bar}`} />
       <div className="relative flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink">
@@ -50,26 +52,30 @@ export default function Overview() {
   const retry = useRetryInit();
   const [, navigate] = useLocation();
   const search = new URLSearchParams(useSearch());
-  const atParam = Number(search.get('at')) || null;
-  const [win, setWin] = useState<number>(5);
-  const [featureKey, setFeatureKey] = useState('rf_snr');
-  const [hold, setHold] = useState<number | null>(atParam ? atParam + (win * 60_000) / 2 : null);
+  const parsedAt = Number(search.get('at'));
+  const atParam = Number.isFinite(parsedAt) && parsedAt > 0 ? parsedAt : null;
+  const [win, setWin] = useQueryState('window', 5, v => [2,5,10,15].includes(v));
+  const [featureKey, setFeatureKey] = useQueryState('channel', 'rf_snr');
+  const [hold, setHold] = useQueryState<number | null>('end', null, v => v === null || typeof v === 'number' && Number.isFinite(v) && v > 0);
   const [inspect, setInspect] = useState<Reading | null>(null);
 
+  useEffect(() => { if (atParam && Number.isFinite(atParam) && !search.has('end')) setHold(atParam + win * 30_000); }, [atParam]);
+  useEffect(() => { setInspect(null); }, [s.epoch]);
+  const ordered = useMemo(() => chronological(s.readings), [s.readings]);
   const features = s.config?.features ?? [];
   const feature = features.find((f) => f.key === featureKey) ?? features[0];
-  const latest = s.readings[s.readings.length - 1];
-  const earliest = s.readings[0];
+  const latest = ordered[ordered.length - 1];
+  const earliest = ordered[0];
   const historyMs = latest && earliest ? latest.ts - earliest.ts : 0;
   const end = hold ?? latest?.ts ?? 0;
   const range: [number, number] = [end - win * 60_000, end];
 
   const openCount = s.incidents.filter((i) => i.lifecycle === 'open').length;
   const queue = useMemo(
-    () => [...s.incidents].sort((a, b) => (a.lifecycle === b.lifecycle ? b.lastSeen - a.lastSeen || a.id.localeCompare(b.id) : a.lifecycle === 'open' ? -1 : 1)).slice(0, 6),
+    () => [...s.incidents].sort((a, b) => (a.lifecycle === b.lifecycle ? (b.lastSeen ?? -Infinity) - (a.lastSeen ?? -Infinity) || a.id.localeCompare(b.id) : a.lifecycle === 'open' ? -1 : 1)).slice(0, 6),
     [s.incidents],
   );
-  const latestInc = useMemo(() => [...s.incidents].sort((a, b) => b.firstSeen - a.firstSeen)[0], [s.incidents]);
+  const latestInc = useMemo(() => [...s.incidents].sort((a, b) => (b.firstSeen ?? -Infinity) - (a.firstSeen ?? -Infinity))[0], [s.incidents]);
   const recent = s.readings.slice(-8).reverse();
   const newerThanHold = hold != null && latest ? s.readings.filter((r) => r.ts > hold).length : 0;
 
@@ -89,7 +95,7 @@ export default function Overview() {
   const loading = s.status === 'loading' || !feature;
 
   return (
-    <div className="animate-in fade-in-0 duration-150">
+    <div className="">
       <PageHeader
         title="Mission overview"
         subtitle={
@@ -192,8 +198,9 @@ export default function Overview() {
                 threshold={s.config!.threshold}
                 height={300}
                 selectedId={inspect?.id}
-                onSelectReading={setInspect}
-                onSelectIncident={(inc) => navigate(`/incidents/${inc.id}?at=${inc.firstSeen}`)}
+                onInspectionStart={() => { if (hold == null && latest) setHold(latest.ts); }}
+              onSelectReading={setInspect}
+                onSelectIncident={(inc) => navigate(`/incidents/${encodeURIComponent(inc.id)}?at=${inc.firstSeen}`)}
               />
             )}
           </div>
@@ -211,11 +218,11 @@ export default function Overview() {
           {latestInc && (
             <div className="border-b border-divider bg-peach/70 px-4 py-3 text-[12.5px] leading-relaxed text-ink-2 md:px-5" data-testid="text-latest-trigger">
               <span className="text-ink-3">Latest trigger · </span>
-              <Link href={`/incidents/${latestInc.id}?at=${latestInc.firstSeen}`} className="font-mono text-rose hover:underline">
+              <Link href={`/incidents/${encodeURIComponent(latestInc.id)}?at=${latestInc.firstSeen}`} className="font-mono text-rose hover:underline">
                 {latestInc.id}
               </Link>{' '}
               opened at <span className="tnum text-ink">{fmtTime(latestInc.firstSeen)} UTC</span>{backend.client ? ` · Backend guard: ${s.config?.consecutive} of ${s.config?.windowRows} rows at ≥ ${fmtConf(s.config?.threshold)} confidence. ` : ` after ${latestInc.triggerReadingIds.length} consecutive ${CLASS_LABEL[latestInc.cls]} readings. `}
-              {latestInc.triggerReadingIds[0] && <>First trigger{' '}<Link href={`/telemetry?reading=${latestInc.triggerReadingIds[0]}&at=${latestInc.firstSeen}`} className="font-mono text-ink hover:text-lav hover:underline">
+              {latestInc.triggerReadingIds[0] && <>First trigger{' '}<Link href={`/telemetry?reading=${encodeURIComponent(latestInc.triggerReadingIds[0])}&at=${latestInc.firstSeen}`} className="font-mono text-ink hover:text-lav hover:underline">
                 {latestInc.triggerReadingIds[0]}
               </Link></>}
               .
@@ -233,7 +240,7 @@ export default function Overview() {
               {queue.map((inc) => (
                 <li key={inc.id}>
                   <Link
-                    href={`/incidents/${inc.id}?at=${inc.firstSeen}`}
+                    href={`/incidents/${encodeURIComponent(inc.id)}?at=${inc.firstSeen}`}
                     className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 px-4 py-3 transition-colors duration-150 hover:bg-sun/60 md:px-5"
                     data-testid={`row-queue-${inc.id}`}
                   >
@@ -293,7 +300,7 @@ export default function Overview() {
                   <td className="px-3 py-2 text-right tnum">{fmtConf(r.confidence)}</td>
                   <td className="px-5 py-2">
                     {r.incidentId ? (
-                      <Link href={`/incidents/${r.incidentId}?at=${r.ts}&reading=${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] text-rose hover:underline">
+                      <Link href={`/incidents/${encodeURIComponent(r.incidentId)}?at=${r.ts}&reading=${encodeURIComponent(r.id)}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] text-rose hover:underline">
                         {r.incidentId}
                       </Link>
                     ) : (

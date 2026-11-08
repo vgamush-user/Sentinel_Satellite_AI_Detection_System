@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { cn } from '@/lib/utils';
+import { chronological, extremaIndices, sequenceGaps } from '@/lib/sentinel/chart-model';
 import { CLASS_LABEL, isNominal, fmtConf, fmtTime, fmtUnit, fmtValue } from '@/lib/sentinel/format';
 import type { FeatureDef, Incident, Reading } from '@/lib/sentinel/types';
 
@@ -15,78 +15,76 @@ interface Props {
   onSelectReading?: (r: Reading) => void;
   onSelectIncident?: (inc: Incident) => void;
   onInspect?: (r: Reading | null) => void;
+  onInspectionStart?: () => void;
   label: string;
 }
 
 const M = { l: 52, r: 14, t: 30, b: 26 };
 const TICK_STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 1800].map((s) => s * 1000);
 
-export function TelemetryChart({ readings, feature, incidents, range, selectedId, contextTs, threshold, height = 300, onSelectReading, onSelectIncident, onInspect, label }: Props) {
+export function TelemetryChart({ readings, feature, incidents, range, selectedId, contextTs, threshold, height = 300, onSelectReading, onSelectIncident, onInspect, onInspectionStart, label }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
-  const [hover, setHover] = useState<number | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const onInspectRef = useRef(onInspect);
   onInspectRef.current = onInspect;
 
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver((e) => setWidth(Math.max(280, e[0].contentRect.width)));
+    const ro = new ResizeObserver((e) => setWidth(Math.max(1, e[0].contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const [t0, t1] = range;
-  const iw = width - M.l - M.r;
+  const iw = Math.max(1, width - M.l - M.r);
   const ih = height - M.t - M.b;
   const x = (ts: number) => M.l + ((ts - t0) / Math.max(1, t1 - t0)) * iw;
 
-  const visible = useMemo(() => readings.filter((r) => r.ts >= t0 && r.ts <= t1), [readings, t0, t1]);
+  const visible = useMemo(() => chronological(readings).filter((r) => r.ts >= t0 && r.ts <= t1), [readings, t0, t1]);
 
   const model = useMemo(() => {
     const vals = visible.map((r) => r.features[feature.key]).filter((v): v is number => v != null && Number.isFinite(v));
     if (!vals.length) return null;
-    let lo = Math.min(...vals);
-    let hi = Math.max(...vals);
+    const scale = Math.max(1, ...vals.map(Math.abs));
+    let lo = Math.min(...vals.map(v => v / scale));
+    let hi = Math.max(...vals.map(v => v / scale));
     if (hi - lo < 1e-9) {
-      lo -= 1;
-      hi += 1;
+      lo -= 0.01;
+      hi += 0.01;
     }
     const pad = (hi - lo) * 0.12;
     lo -= pad;
     hi += pad;
     // segments: break on missing value or dropped sequence
     const seg: number[] = [];
-    const gaps: { from: number; to: number; kind: 'dropped' | 'null' }[] = [];
+    const gaps = sequenceGaps(visible);
     let sid = 0;
     for (let i = 0; i < visible.length; i++) {
       const r = visible[i];
       const prev = visible[i - 1];
-      if (prev && r.seq - prev.seq > 1) {
-        sid++;
-        gaps.push({ from: prev.ts, to: r.ts, kind: 'dropped' });
-      }
-      if (r.features[feature.key] == null) {
+      if (prev && gaps.some(g => g.kind === 'dropped' && prev.ts <= g.from && r.ts >= g.to)) sid++;
+      if (r.features[feature.key] == null || !Number.isFinite(r.features[feature.key])) {
         sid++;
         gaps.push({ from: (prev ?? r).ts, to: (visible[i + 1] ?? r).ts, kind: 'null' });
       }
       seg.push(sid);
     }
-    const maxPts = Math.max(60, Math.floor(iw / 2));
-    const step = Math.max(1, Math.ceil(visible.length / maxPts));
-    return { lo, hi, seg, gaps, step };
+    return { lo, hi, scale, seg, gaps };
   }, [visible, feature.key, iw]);
 
-  const y = (v: number) => (model ? M.t + (1 - (v - model.lo) / (model.hi - model.lo)) * ih : 0);
+  const y = (v: number) => (model ? M.t + (1 - (v / model.scale - model.lo) / (model.hi - model.lo)) * ih : 0);
 
+  const kept = useMemo(() => extremaIndices(visible, feature.key, iw, selectedId), [visible, feature.key, iw, selectedId]);
   const path = useMemo(() => {
     if (!model) return '';
     let d = '';
     let prevSeg = -1;
     visible.forEach((r, i) => {
       const v = r.features[feature.key];
-      const keep = i % model.step === 0 || !isNominal(r.predicted) || r.id === selectedId || i === visible.length - 1 || model.seg[i] !== model.seg[i - 1] || model.seg[i] !== model.seg[i + 1];
-      if (v == null || !keep) return;
+      const keep = kept.has(i) || !isNominal(r.predicted) || r.id === selectedId || i === visible.length - 1 || model.seg[i] !== model.seg[i - 1] || model.seg[i] !== model.seg[i + 1];
+      if (v == null || !Number.isFinite(v) || !keep) return;
       const cmd = model.seg[i] === prevSeg ? 'L' : 'M';
       d += `${cmd}${x(r.ts).toFixed(1)},${y(v).toFixed(1)}`;
       prevSeg = model.seg[i];
@@ -94,7 +92,7 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
     return d;
     // x/y derive from these deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, model, feature.key, selectedId, width, t0, t1, height]);
+  }, [visible, model, kept, feature.key, selectedId, width, t0, t1, height]);
 
   const ticks = useMemo(() => {
     const span = t1 - t0;
@@ -104,9 +102,9 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
     return out;
   }, [t0, t1, iw]);
 
-  const yTicks = model ? [0, 1, 2, 3].map((i) => model.lo + ((model.hi - model.lo) * (i + 0.5)) / 4) : [];
+  const yTicks = model ? [0, 1, 2, 3].map((i) => Math.max(-Number.MAX_VALUE, Math.min(Number.MAX_VALUE, (model.lo + ((model.hi - model.lo) * (i + 0.5)) / 4) * model.scale))) : [];
 
-  const shownIncidents = incidents.filter((i) => i.firstSeen <= t1 && (i.closedAt ?? i.lastSeen) >= t0);
+  const shownIncidents = incidents.filter((i): i is Incident & { firstSeen: number; lastSeen: number } => i.firstSeen != null && i.lastSeen != null && i.firstSeen <= t1 && (i.closedAt ?? i.lastSeen) >= t0);
 
   const nearest = (ts: number) => {
     if (!visible.length) return null;
@@ -120,7 +118,7 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
     return Math.abs(visible[lo].ts - ts) <= Math.abs(visible[hi].ts - ts) ? lo : hi;
   };
 
-  const hovered = hover != null ? visible[hover] : null;
+  const hovered = hover != null ? visible.find(r => r.id === hover) ?? null : null;
   useEffect(() => {
     onInspectRef.current?.(hovered ?? null);
   }, [hovered]);
@@ -129,13 +127,15 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     if (px < M.l || px > width - M.r) return setHover(null);
-    setHover(nearest(t0 + ((px - M.l) / iw) * (t1 - t0)));
+    const index = nearest(t0 + ((px - M.l) / iw) * (t1 - t0));
+    setHover(index == null ? null : visible[index].id);
   };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!visible.length) return;
+    if (e.target !== e.currentTarget || !visible.length) return;
     const selIdx = selectedId ? visible.findIndex((r) => r.id === selectedId) : -1;
-    const cur = hover ?? (selIdx >= 0 ? selIdx : visible.length - 1);
+    const hoverIdx = hover == null ? -1 : visible.findIndex(r => r.id === hover);
+    const cur = hoverIdx >= 0 ? hoverIdx : selIdx >= 0 ? selIdx : visible.length - 1;
     let next = cur;
     if (e.key === 'ArrowLeft') next = Math.max(0, cur - (e.shiftKey ? 10 : 1));
     else if (e.key === 'ArrowRight') next = Math.min(visible.length - 1, cur + (e.shiftKey ? 10 : 1));
@@ -150,7 +150,8 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
       return;
     } else return;
     e.preventDefault();
-    setHover(next);
+    onInspectionStart?.();
+    setHover(visible[next].id);
   };
 
   const selected = selectedId ? visible.find((r) => r.id === selectedId) : null;
@@ -170,7 +171,7 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
         className="rounded-[6px] focus-visible:outline-offset-4"
         data-testid="chart-telemetry"
       >
-        <svg width={width} height={height} onPointerMove={onMove} onPointerLeave={() => setHover(null)} onClick={() => hovered && onSelectReading?.(hovered)} className="block cursor-crosshair">
+        <svg width={width} height={height} onPointerMove={onMove} onPointerLeave={() => setHover(null)} onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const px = e.clientX - rect.left; if (px < M.l || px > width - M.r) return; const index = nearest(t0 + ((px - M.l) / iw) * (t1 - t0)); if (index != null) onSelectReading?.(visible[index]); }} className="block cursor-crosshair">
           <defs>
             <pattern id="gap-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
               <line x1="0" y1="0" x2="0" y2="6" stroke="var(--color-support)" strokeWidth="2" />
@@ -266,22 +267,22 @@ export function TelemetryChart({ readings, feature, incidents, range, selectedId
               className="absolute top-[14px] inline-flex h-[18px] items-center gap-1 rounded-[4px] border border-rose/50 bg-danger-surface px-1.5 font-mono text-[10.5px] text-rose transition-colors duration-150 hover:bg-danger-hover focus-visible:outline-action"
               style={{ left }}
             >
-              <span aria-hidden className={cn('size-1.5 rounded-full bg-rose', inc.lifecycle === 'open' && 'animate-pulse')} />
+              <span aria-hidden className={'size-1.5 rounded-full bg-rose'} />
               {inc.id}
             </button>
           );
         })}
       </div>
 
+      {model && kept.size < visible.length && <span className="block px-3 text-[11px] text-ink-3">Line simplified for width; extrema and flagged readings retained.</span>}
       {!model && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-[12.5px] text-ink-3">{visible.length ? `No ${feature.label.toLowerCase()} values in this window` : 'Waiting for telemetry in this window'}</div>
       )}
 
       {hovered && (
         <div
-          role="status"
-          className="pointer-events-none absolute z-10 w-[230px] rounded-[12px] border border-divider bg-panel/95 p-2.5 text-[12px] shadow-[0_12px_28px_-14px_rgb(138_121_103/0.5)]"
-          style={{ left: Math.min(Math.max(tipLeft + 12, 0), width - 240), top: M.t + 4 }}
+          className="pointer-events-none absolute z-10 w-[230px] max-w-full rounded-[12px] border border-divider bg-panel/95 p-2.5 text-[12px] shadow-[0_12px_28px_-14px_rgb(138_121_103/0.5)]"
+          style={{ left: Math.max(0, Math.min(tipLeft + 12, width - Math.min(230, width))), top: M.t + 4 }}
         >
           <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
             <span>{hovered.id}</span>

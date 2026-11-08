@@ -1,5 +1,6 @@
 import { CONFIG, SAMPLE_INPUTS, SCENARIOS, SampleSource, classify, CLASS_INFO, cloneIncident, readingId, seqTs } from './sample-source';
 import { CLASS_LABEL, fmtConf } from './format';
+import { SAMPLE_STORAGE_KEY, LEGACY_SAMPLE_STORAGE_KEY, parseSamplePersistence } from './persistence';
 import type {
   AdapterEvent,
   AnalysisRequest,
@@ -8,6 +9,7 @@ import type {
   AttackRequest,
   Incident,
   Playback,
+  Reading,
   ReplayAction,
   SampleInput,
   Scenario,
@@ -39,9 +41,9 @@ export interface SentinelAdapter {
   reconnect(): Promise<void>;
   reset(): void;
   getRuns(): AttackAck[];
+  getEvidence?(): Reading[];
 }
 
-const STORAGE_KEY = 'sentinelsat.sample.v1';
 const START_SEQ = 278;
 
 interface Persisted {
@@ -66,18 +68,30 @@ export class SampleAdapter implements SentinelAdapter {
   private connected = true;
   private runs: AttackAck[] = [];
   private analysisCount = 0;
+  private generation = 0;
+  private sessionId: string = crypto.randomUUID();
+  private recoveryNotice: string | undefined;
 
   constructor() {
     this.load();
   }
 
-  private load() {
+  private load(reset = false) {
     let p: Persisted | null = null;
+    this.recoveryNotice = undefined;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) p = JSON.parse(raw);
+      if (!reset) {
+        const current = localStorage.getItem(SAMPLE_STORAGE_KEY);
+        const raw = current ?? localStorage.getItem(LEGACY_SAMPLE_STORAGE_KEY);
+        if (raw) {
+          const saved = parseSamplePersistence(raw, current == null);
+          p = saved.payload;
+          this.sessionId = saved.sessionId;
+        }
+      } else this.sessionId = crypto.randomUUID();
     } catch {
       p = null;
+      this.recoveryNotice = 'Saved sample data could not be restored safely. A fresh sample session was started; the legacy saved data was not deleted.';
     }
     this.src = new SampleSource();
     this.src.overrides = p?.overrides ?? {};
@@ -94,6 +108,7 @@ export class SampleAdapter implements SentinelAdapter {
     }
     this.src.advanceTo(target);
     this.src.takeChanges();
+    this.save();
   }
 
   private save() {
@@ -106,7 +121,7 @@ export class SampleAdapter implements SentinelAdapter {
       runs: this.runs,
     };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+      localStorage.setItem(SAMPLE_STORAGE_KEY, JSON.stringify({ version: 2, sessionId: this.sessionId, payload: p }));
     } catch {
       /* storage unavailable: session-only demo */
     }
@@ -144,7 +159,7 @@ export class SampleAdapter implements SentinelAdapter {
   private snapshot(): StateSnapshot {
     const rs = this.src.readings.slice(-CONFIG.bufferSize);
     return {
-      config: CONFIG,
+      config: { ...CONFIG, sampleSessionId: this.sessionId, recoveryNotice: this.recoveryNotice },
       readings: rs.map((r) => ({ ...r, features: { ...r.features } })),
       incidents: this.src.incidents.map(cloneIncident),
       stats: this.stats(),
@@ -208,9 +223,15 @@ export class SampleAdapter implements SentinelAdapter {
   getRuns() {
     return this.runs;
   }
+  getEvidence() {
+    const ids = new Set(this.runs.flatMap(run => run.readingIds));
+    return this.src.readings.filter(row => ids.has(row.id)).slice(-1000);
+  }
 
   async runAttack(req: AttackRequest): Promise<AttackAck> {
+    const generation = this.generation;
     await wait(650);
+    if (generation !== this.generation) throw new Error('The sample session was reset. This simulation was not submitted.');
     if (!this.connected) throw new Error('Feed disconnected. The simulation request was not submitted.');
     const sc = SCENARIOS.find((s) => s.id === req.scenarioId);
     if (!sc) throw new Error(`Unknown scenario ${req.scenarioId}.`);
@@ -266,7 +287,9 @@ export class SampleAdapter implements SentinelAdapter {
   }
 
   async runAnalysis(req: AnalysisRequest): Promise<AnalysisResponse> {
+    const generation = this.generation;
     await wait(700);
+    if (generation !== this.generation) throw new Error('The sample session was reset. Run analysis again to use the new session.');
     if (!this.connected) throw new Error('Analysis service unreachable: feed disconnected. Your inputs are unchanged.');
     for (const [k, v] of Object.entries(req.features)) {
       if (!Number.isFinite(v)) throw new Error(`Feature ${k} must be a finite number.`);
@@ -306,8 +329,10 @@ export class SampleAdapter implements SentinelAdapter {
   }
 
   async reconnect() {
+    const generation = this.generation;
     this.listeners.forEach((l) => l({ type: 'connection', state: 'reconnecting' }));
     await wait(900);
+    if (generation !== this.generation) return;
     this.connected = true;
     this.src.takeChanges();
     this.emit({ type: 'resync', snapshot: this.snapshot() });
@@ -316,17 +341,11 @@ export class SampleAdapter implements SentinelAdapter {
   }
 
   reset() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-    this.load();
+    this.generation++;
+    this.load(true);
     this.connected = true;
     this.schedule();
-    this.emit({ type: 'resync', snapshot: this.snapshot() });
-    this.emit({ type: 'runs', runs: this.runs });
-    this.emit({ type: 'connection', state: 'connected' });
+    this.emit({ type: 'reset', snapshot: this.snapshot() });
   }
 }
 
@@ -335,7 +354,7 @@ export class SampleAdapter implements SentinelAdapter {
  * sample demo. A connected adapter is not bundled in this build; any other
  * value is rejected by the app instead of substituting sample data.
  */
-export const SOURCE_SETTING = (import.meta.env.VITE_SENTINEL_SOURCE as string | undefined) ?? 'sample';
+export const SOURCE_SETTING = (import.meta.env?.VITE_SENTINEL_SOURCE as string | undefined) ?? 'sample';
 export const SOURCE_FALLBACK = SOURCE_SETTING !== 'sample';
 
 export function createAdapter(): SentinelAdapter {

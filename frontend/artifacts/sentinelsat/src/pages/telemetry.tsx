@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryState } from '@/hooks/use-query-state';
+import { compareReadings } from '@/lib/sentinel/reading-order';
+import { chronological } from '@/lib/sentinel/chart-model';
 import { Link, useLocation, useSearch } from 'wouter';
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Crosshair, Search, SearchX } from 'lucide-react';
 import { Btn, Empty, NativeSelect, PageHeader, Panel, PanelHead, PredictionCell, Segmented, Skel } from '@/components/kit';
@@ -9,6 +12,7 @@ import { CLASS_LABEL, isNominal, fmtConf, fmtInt, fmtTime, fmtValue } from '@/li
 import { useSentinel } from '@/lib/sentinel/store';
 import type { Reading } from '@/lib/sentinel/types';
 import { useBackend } from '@/lib/backend/context';
+import { resolveReading } from '@/lib/sentinel/evidence';
 import { normalizeData } from '@/lib/backend/normalize';
 
 type SortKey = 'ts' | 'confidence' | 'latency';
@@ -17,7 +21,8 @@ const WINDOWS = ['2', '5', '10', '15'] as const;
 
 export default function Telemetry() {
   const s = useSentinel();
-  const { data: backendData, evidence, evidenceDecisions } = useBackend();
+  const backend = useBackend();
+  const { data: backendData, evidence, evidenceDecisions } = backend;
   const retainedRows = useMemo(() => backendData && evidence.size
     ? normalizeData({ ...backendData, recent: [...evidence.values()],
       decisions: new Map([...evidenceDecisions, ...backendData.decisions]) }).readings : [],
@@ -25,25 +30,35 @@ export default function Telemetry() {
   const [, navigate] = useLocation();
   const search = new URLSearchParams(useSearch());
   const paramReading = search.get('reading');
+  const [, setReadingParam] = useQueryState('reading', '');
 
-  const [featureKey, setFeatureKey] = useState('rf_snr');
-  const [source, setSource] = useState('all');
-  const [cls, setCls] = useState('all');
-  const [q, setQ] = useState('');
-  const [win, setWin] = useState('5');
-  const [anchor, setAnchor] = useState<number | null>(null); // null = follow latest
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'ts', dir: 'desc' });
-  const [page, setPage] = useState(0);
+  const [featureKey, setFeatureKey] = useQueryState('channel', 'rf_snr');
+  const [source, setSource] = useQueryState('source', 'all', v => ['all','downlink','threat-lab'].includes(v) || v.startsWith('orig:'));
+  const [cls, setCls] = useQueryState('prediction', 'all', v => s.status !== 'ready' || ['all','flagged','nominal', ...(s.config?.classes ?? [])].includes(v));
+  const [q, setQ] = useQueryState('q', '');
+  const [win, setWin] = useQueryState('window', '5', v => ['2','5','10','15'].includes(v));
+  const [anchor, setAnchor] = useQueryState<number | null>('end', null, v => v === null || (typeof v === 'number' && Number.isFinite(v) && v > 0)); // null = follow latest
+  const [sort, setSort] = useQueryState<{ key: SortKey; dir: 'asc' | 'desc' }>('sort', { key: 'ts', dir: 'desc' }, v => !!v && ['ts','confidence','latency'].includes(v.key) && ['asc','desc'].includes(v.dir));
+  const [page, setPage] = useQueryState('page', 0, v => Number.isInteger(v) && v >= 0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [revealNotice, setRevealNotice] = useState('');
+  const revealTarget = useRef<string | null>(null);
   const handledParam = useRef<string | null>(null);
+
+  useEffect(() => { handledParam.current = null; if (!paramReading) { setSelectedId(null); setInspectorOpen(false); } }, [paramReading, search.get('at')]);
+  useEffect(() => { const at = Number(search.get('at')); if (at > 0 && Number.isFinite(at) && !search.has('end')) setAnchor(at + Number(win) * 30_000); }, [search.get('at')]);
+
+  const epochRef = useRef(s.epoch);
+  useEffect(() => { if (epochRef.current === s.epoch) return; epochRef.current = s.epoch; setSelectedId(null); setInspectorOpen(false); handledParam.current = null; setReadingParam(''); setAnchor(null); }, [s.epoch]);
 
   const features = s.config?.features ?? [];
   const classes = s.config?.classes ?? [];
   const origSources = useMemo(() => [...new Set(s.readings.map((r) => r.originalSource).filter((x): x is string => !!x))].sort(), [s.readings]);
   const feature = features.find((f) => f.key === featureKey) ?? features[0];
-  const latest = s.readings[s.readings.length - 1];
+  const ordered = useMemo(() => chronological(s.readings), [s.readings]);
+  const latest = ordered[ordered.length - 1];
   const winMs = Number(win) * 60_000;
   const end = anchor ?? latest?.ts ?? 0;
   const range: [number, number] = [end - winMs, end];
@@ -51,14 +66,14 @@ export default function Telemetry() {
   // deep link: /telemetry?reading=rd-…&at=…
   useEffect(() => {
     if (!paramReading || handledParam.current === paramReading || s.status !== 'ready') return;
-    const r = s.readingIndex.get(paramReading) ?? retainedRows.find(row => row.id === paramReading);
-    handledParam.current = paramReading;
+    const r = resolveReading(paramReading, s, backend);
     if (!r) return;
+    handledParam.current = paramReading;
     setSelectedId(r.id);
     setInspectorOpen(true);
-    const lt = s.readings[s.readings.length - 1]?.ts ?? r.ts;
-    setAnchor(Math.min(lt, r.ts + winMs / 2));
-  }, [paramReading, s.status, s.readingIndex, s.readings, winMs, retainedRows]);
+    const lt = latest?.ts ?? r.ts;
+    if (!search.has('end')) setAnchor(Math.min(lt, r.ts + winMs / 2));
+  }, [paramReading, s.status, s.readingIndex, s.readings, s.evidence, winMs, retainedRows]);
 
   const inWindow = useMemo(() => s.readings.filter((r) => r.ts >= range[0] && r.ts <= range[1]), [s.readings, range[0], range[1]]);
   const filtered = useMemo(() => {
@@ -68,17 +83,19 @@ export default function Telemetry() {
       if (cls === 'flagged' && isNominal(r.predicted)) return false;
       if (cls === 'nominal' && !isNominal(r.predicted)) return false;
       if (cls !== 'all' && cls !== 'flagged' && cls !== 'nominal' && r.predicted !== cls) return false;
-      if (needle && !(r.id.includes(needle) || (r.incidentId ?? '').toLowerCase().includes(needle) || (r.runId ?? '').toLowerCase().includes(needle))) return false;
+      if (needle && !(r.id.toLowerCase().includes(needle) || (r.incidentId ?? '').toLowerCase().includes(needle) || (r.runId ?? '').toLowerCase().includes(needle))) return false;
       return true;
     });
   }, [inWindow, source, cls, q]);
-  const sorted = useMemo(() => {
-    const v = (r: Reading) => (sort.key === 'ts' ? r.seq : sort.key === 'confidence' ? r.confidence : r.latencyMs ?? -1);
-    return [...filtered].sort((a, b) => (v(a) - v(b)) * (sort.dir === 'asc' ? 1 : -1) || b.seq - a.seq);
-  }, [filtered, sort]);
+  const sorted = useMemo(() => [...filtered].sort((a, b) => compareReadings(a, b, sort)), [filtered, sort]);
   const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
   const pg = Math.min(page, pages - 1);
   const rows = sorted.slice(pg * PAGE, pg * PAGE + PAGE);
+  useEffect(() => {
+    if (!revealTarget.current || !rows.some(r => r.id === revealTarget.current)) return;
+    const target = document.getElementById(`reading-${revealTarget.current}`);
+    if (target) { target.scrollIntoView({ block: 'nearest', behavior: 'auto' }); target.focus({ preventScroll: true }); revealTarget.current = null; }
+  }, [rows]);
   const newSinceHold = anchor != null ? s.readings.filter((r) => r.ts > anchor).length : 0;
   const filtersActive = source !== 'all' || cls !== 'all' || q !== '';
 
@@ -88,6 +105,7 @@ export default function Telemetry() {
   const select = (r: Reading, open = true) => {
     holdHere();
     setSelectedId(r.id);
+    setReadingParam(r.id);
     const idx = sorted.findIndex((x) => x.id === r.id);
     if (idx >= 0) setPage(Math.floor(idx / PAGE));
     if (open) setInspectorOpen(true);
@@ -103,21 +121,21 @@ export default function Telemetry() {
     setPage(0);
   };
   const pan = (dir: -1 | 1) => {
-    const first = s.readings[0]?.ts ?? 0;
+    const first = ordered[0]?.ts ?? 0;
     const next = Math.max(first + winMs * 0.5, end + (dir * winMs) / 2);
     if (latest && next >= latest.ts) setAnchor(null);
     else setAnchor(next);
     setPage(0);
   };
 
-  const liveSel = selectedId ? s.readingIndex.get(selectedId) ?? retainedRows.find(row => row.id === selectedId) ?? null : null;
+  const liveSel = selectedId ? resolveReading(selectedId, s, backend) ?? null : null;
   const snapRef = useRef<Reading | null>(null);
   if (liveSel) snapRef.current = liveSel;
   else if (snapRef.current?.id !== selectedId) snapRef.current = null;
   const selected = liveSel ?? snapRef.current;
   const selectedVisible = selectedId ? rows.some((r) => r.id === selectedId) : false;
 
-  const SortHead = ({ k, children, right }: { k: SortKey; children: string; right?: boolean }) => (
+  const sortHead = (k: SortKey, children: string, right = false) => (
     <th className={cn('px-3 py-2 font-medium', right && 'text-right')} aria-sort={sort.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button onClick={() => toggleSort(k)} className={cn('inline-flex items-center gap-1 hover:text-ink', sort.key === k && 'text-ink')} data-testid={`button-sort-${k}`}>
         {children}
@@ -127,9 +145,11 @@ export default function Telemetry() {
   );
 
   return (
-    <div className="animate-in fade-in-0 duration-150">
+    <div>
       <PageHeader title="Telemetry" subtitle="Stream and replay workspace. Filters apply to the table; the plot always shows the full channel." />
 
+      {revealNotice && <p role="status" className="mb-3 text-[13px] text-ink-2">{revealNotice}</p>}
+      {paramReading && s.status === 'ready' && !resolveReading(paramReading, s, backend) && <p role="status" className="mb-3 text-[13px] text-ink-2">Reading {paramReading} is unavailable in current client history. The stream may still deliver it. Use the time controls or return to latest.</p>}
       <Panel className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 md:px-5">
         {feature && (
           <NativeSelect label="Channel" value={feature.key} onChange={(e) => setFeatureKey(e.target.value)} data-testid="select-channel">
@@ -225,14 +245,15 @@ export default function Telemetry() {
               selectedId={selectedId}
               threshold={s.config!.threshold}
               height={320}
+              onInspectionStart={holdHere}
               onInspect={(r) => setHoverId(r?.id ?? null)}
               onSelectReading={(r) => select(r)}
-              onSelectIncident={(inc) => navigate(`/incidents/${inc.id}?at=${inc.firstSeen}`)}
+              onSelectIncident={(inc) => navigate(`/incidents/${encodeURIComponent(inc.id)}?at=${inc.firstSeen}`)}
             />
           )}
         </div>
         <div className="border-t border-divider px-4 py-2.5 md:px-5">
-          <ChartLegend downsampled={inWindow.length > 400} />
+          <ChartLegend />
         </div>
       </Panel>
 
@@ -247,8 +268,15 @@ export default function Telemetry() {
           }
         >
           {selected && !selectedVisible && (
-            <Btn size="sm" variant="ghost" onClick={() => select(selected, false)} data-testid="button-jump-selected">
-              Jump to {selected.id}
+            <Btn size="sm" variant="ghost" onClick={() => {
+              if (!s.readingIndex.has(selected.id)) { setInspectorOpen(true); return; }
+              const nextEnd = selected.ts + winMs / 2;
+              const nextRows = s.readings.filter(r => r.ts >= nextEnd - winMs && r.ts <= nextEnd).sort((a, b) => compareReadings(a, b, sort));
+              revealTarget.current = selected.id;
+              resetFilters(); setAnchor(nextEnd); setPage(Math.max(0, Math.floor(nextRows.findIndex(r => r.id === selected.id) / PAGE)));
+              setRevealNotice(filtersActive ? `Filters cleared to reveal ${selected.id}.` : `Showing ${selected.id}.`);
+            }} data-testid="button-jump-selected">
+              {s.readingIndex.has(selected.id) ? 'Reveal' : 'Open retained reading'} {selected.id}
             </Btn>
           )}
         </PanelHead>
@@ -256,17 +284,13 @@ export default function Telemetry() {
           <table className="w-full min-w-[820px] text-[13px]">
             <thead className="sticky top-0 z-[1] bg-panel">
               <tr className="border-b border-divider text-left text-[12px] text-ink-3">
-                <SortHead k="ts">Time (UTC)</SortHead>
+                {sortHead('ts', 'Time (UTC)')}
                 <th className="px-3 py-2 font-medium">Entry ID</th>
                 <th className="px-3 py-2 font-medium">Source</th>
                 <th className="px-3 py-2 font-medium">Predicted class</th>
-                <SortHead k="confidence" right>
-                  Confidence
-                </SortHead>
+                {sortHead('confidence', 'Confidence', true)}
                 {feature && <th className="px-3 py-2 text-right font-medium">{feature.key}</th>}
-                <SortHead k="latency" right>
-                  Latency
-                </SortHead>
+                {sortHead('latency', 'Latency', true)}
                 <th className="px-4 py-2 font-medium">Incident</th>
               </tr>
             </thead>
@@ -276,7 +300,6 @@ export default function Telemetry() {
                 return (
                   <tr
                     key={r.id}
-                    aria-selected={sel}
                     onClick={() => select(r)}
                     className={cn(
                       'cursor-pointer border-b border-divider/60 transition-colors duration-150',
@@ -286,7 +309,7 @@ export default function Telemetry() {
                   >
                     <td className="px-3 py-1.5 tnum text-ink-2">{fmtTime(r.ts)}</td>
                     <td className="px-3 py-1.5">
-                      <button onClick={(e) => (e.stopPropagation(), select(r))} className="font-mono text-[12.5px] text-ink hover:text-lav" data-testid={`button-reading-${r.id}`}>
+                      <button id={`reading-${r.id}`} aria-current={sel ? 'true' : undefined} onClick={(e) => (e.stopPropagation(), select(r))} className="font-mono text-[12.5px] text-ink hover:text-lav" data-testid={`button-reading-${r.id}`}>
                         {r.id}
                       </button>
                     </td>
@@ -299,7 +322,7 @@ export default function Telemetry() {
                     <td className="px-3 py-1.5 text-right tnum text-ink-2">{r.latencyMs != null ? `${r.latencyMs} ms` : '—'}</td>
                     <td className="px-4 py-1.5">
                       {r.incidentId ? (
-                        <Link href={`/incidents/${r.incidentId}?at=${r.ts}&reading=${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] text-rose hover:underline">
+                        <Link href={`/incidents/${encodeURIComponent(r.incidentId)}?at=${r.ts}&reading=${encodeURIComponent(r.id)}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] text-rose hover:underline">
                           {r.incidentId}
                         </Link>
                       ) : (
@@ -341,7 +364,7 @@ export default function Telemetry() {
       <ReadingInspector
         reading={selected}
         open={inspectorOpen && !!selected}
-        onOpenChange={setInspectorOpen}
+        onOpenChange={(open) => { setInspectorOpen(open); if (!open) handledParam.current = paramReading; }}
         onNavigate={(r) => select(r)}
         showTelemetryLink={false}
       />

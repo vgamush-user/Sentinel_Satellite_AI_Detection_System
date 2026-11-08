@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { Check, ChevronDown, CircleAlert, CircleCheck, CircleDashed, Clock3, Copy, FileText, Loader2, ShieldAlert, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CLASS_LABEL, fmtConf, isNominal } from '@/lib/sentinel/format';
@@ -12,7 +12,7 @@ export const Btn = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButton
         ref={ref}
         {...p}
         className={cn(
-          'inline-flex items-center justify-center gap-1.5 rounded-[9px] font-medium whitespace-nowrap transition-[background-color,border-color,color,opacity,transform] active:translate-y-px duration-150 ease-ui disabled:opacity-45 disabled:cursor-not-allowed select-none',
+          'inline-flex items-center justify-center gap-1.5 rounded-[9px] font-medium whitespace-nowrap active:bg-hover disabled:opacity-45 disabled:cursor-not-allowed select-none',
           size === 'sm' ? 'h-7 px-2.5 text-[12.5px]' : 'h-9 px-3.5 text-[13px]',
           variant === 'primary' && 'bg-action text-on-action font-semibold shadow-[0_2px_0_#c40000] hover:bg-action-hover active:bg-action-pressed',
           variant === 'secondary' && 'border border-divider-strong/70 bg-raised text-ink hover:border-info hover:bg-sky',
@@ -52,7 +52,7 @@ export function PageHeader({ title, subtitle, children }: { title: string; subti
   return (
     <header className="flex flex-wrap items-end justify-between gap-4 pb-5">
       <div className="min-w-0">
-        <h1 className="text-[26px] md:text-[30px] font-semibold leading-tight tracking-[-0.02em] text-ink">{title}</h1>
+        <h1 tabIndex={-1} className="text-[26px] md:text-[30px] font-semibold leading-tight tracking-[-0.02em] text-ink">{title}</h1>
         {subtitle && <p className="mt-1 text-[13.5px] text-ink-2">{subtitle}</p>}
       </div>
       {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
@@ -78,19 +78,40 @@ export function NativeSelect({ label, className, children, hideLabel, ...p }: Se
 }
 
 export function Segmented<T extends string>({ label, value, options, onChange, size = 'sm' }: { label: string; value: T; options: { value: T; label: string; disabled?: boolean; title?: string }[]; onChange: (v: T) => void; size?: 'sm' | 'md' }) {
+  const enabled = options.filter(o => !o.disabled);
+  const tabValue = enabled.some(o => o.value === value) ? value : enabled[0]?.value;
+  const refs = useRef(new Map<T, HTMLButtonElement>());
+  const helpId = useId();
+  const disabledReason = [...new Set(options.filter(o => o.disabled && o.title).map(o => o.title))].join('. ');
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-[10px] border border-divider bg-hover p-0.5">
+    <div className="min-w-0">
+    <div role="radiogroup" aria-label={label} aria-describedby={disabledReason ? helpId : undefined} className="inline-flex rounded-[10px] border border-divider bg-hover p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
+          type="button"
+          ref={node => { if (node) refs.current.set(o.value, node); else refs.current.delete(o.value); }}
           role="radio"
+          tabIndex={o.value === tabValue ? 0 : -1}
           aria-checked={value === o.value}
           disabled={o.disabled}
           title={o.title}
           onClick={() => onChange(o.value)}
+          onKeyDown={event => {
+            const index = enabled.findIndex(option => option.value === o.value);
+            let next: number;
+            if (event.key === 'Home') next = 0;
+            else if (event.key === 'End') next = enabled.length - 1;
+            else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % enabled.length;
+            else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + enabled.length) % enabled.length;
+            else return;
+            event.preventDefault();
+            const option = enabled[next];
+            if (option) { onChange(option.value); refs.current.get(option.value)?.focus(); }
+          }}
           data-testid={`segment-${label.replace(/\s+/g, '-').toLowerCase()}-${o.value}`}
           className={cn(
-            'rounded-[8px] px-2.5 font-medium tnum transition-colors duration-150 disabled:opacity-35 disabled:cursor-not-allowed',
+            'rounded-[8px] px-2.5 font-medium tnum disabled:opacity-35 disabled:cursor-not-allowed',
             size === 'sm' ? 'h-6 text-[12px]' : 'h-7 text-[12.5px]',
             value === o.value ? 'bg-sun-strong text-ink font-semibold shadow-[inset_0_0_0_1px_var(--color-palette-orange)]' : 'text-ink-3 hover:bg-sun hover:text-ink',
           )}
@@ -98,6 +119,8 @@ export function Segmented<T extends string>({ label, value, options, onChange, s
           {o.label}
         </button>
       ))}
+    </div>
+    {disabledReason && <span id={helpId} className="block mt-1 max-w-xs text-[11.5px] text-ink-3">{disabledReason}</span>}
     </div>
   );
 }
@@ -130,6 +153,7 @@ export function PredictionCell({ cls, confidence, threshold = 0.7 }: { cls: Clas
 }
 
 export function LifecycleBadge({ lifecycle }: { lifecycle: Lifecycle }) {
+  if (lifecycle === 'unknown') return <span className="inline-flex items-center gap-1.5 rounded-full bg-hover px-2 py-0.5 text-[12px] font-medium text-ink-2"><CircleDashed aria-hidden className="size-3.5" />Unknown</span>;
   return lifecycle === 'open' ? (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-blush px-2 py-0.5 text-[12px] font-medium text-rose">
       <ShieldAlert aria-hidden className="size-3.5" /> Open
@@ -147,6 +171,7 @@ export function ReportBadge({ status }: { status: ReportStatus }) {
     pending: { icon: Loader2, text: 'Pending', cls: 'text-amber' },
     failed: { icon: XCircle, text: 'Failed', cls: 'text-rose' },
     unavailable: { icon: CircleDashed, text: 'After close', cls: 'text-ink-3' },
+    unknown: { icon: CircleDashed, text: 'Report status unknown', cls: 'text-ink-3' },
   }[status];
   const Icon = m.icon;
   return (
@@ -157,7 +182,8 @@ export function ReportBadge({ status }: { status: ReportStatus }) {
   );
 }
 
-export function ConfidenceBar({ value, threshold }: { value: number; threshold?: number }) {
+export function ConfidenceBar({ value, threshold }: { value: number | null; threshold?: number }) {
+  if (value == null || !Number.isFinite(value)) return <span className="text-ink-3">Unavailable</span>;
   return (
     <span className="inline-flex items-center gap-2 tnum">
       <span className="relative h-1.5 w-14 overflow-hidden rounded-full bg-sky-strong" aria-hidden>
@@ -171,48 +197,63 @@ export function ConfidenceBar({ value, threshold }: { value: number; threshold?:
 
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; if (timer.current) clearTimeout(timer.current); }, []);
   return (
     <Btn
       size="sm"
       variant="ghost"
+      type="button"
+      className="shrink-0"
       aria-label={label}
       data-testid="button-copy"
       onClick={async () => {
+        const current = ++generation.current;
+        if (timer.current) clearTimeout(timer.current);
         try {
           await navigator.clipboard.writeText(text);
+          if (current !== generation.current) return;
           setDone('ok');
         } catch {
+          if (current !== generation.current) return;
           setDone('fail');
         }
-        setTimeout(() => setDone('idle'), 1600);
+        timer.current = setTimeout(() => setDone('idle'), 1600);
       }}
     >
       {done === 'ok' ? <Check className="size-3.5 text-mint" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
-      <span aria-live="polite">{done === 'ok' ? 'Copied' : done === 'fail' ? 'Copy blocked' : label}</span>
+      <span className="inline-grid">
+        {[label, 'Copied', 'Copy blocked'].map((s, i) => <span key={i} aria-hidden className="invisible col-start-1 row-start-1">{s}</span>)}
+        <span aria-live="polite" className="col-start-1 row-start-1">{done === 'ok' ? 'Copied' : done === 'fail' ? 'Copy blocked' : label}</span>
+      </span>
     </Btn>
   );
 }
 
 export function RawBlock({ title, data, defaultOpen = false }: { title: string; data: unknown; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const contentId = useId();
   const text = JSON.stringify(data, null, 2);
   return (
-    <div className="rounded-[12px] border border-dashed border-support/60 bg-hover/60">
-      <div className="flex items-center gap-2 px-3 py-1.5">
+    <div className="min-w-0 max-w-full rounded-[12px] border border-dashed border-support/60 bg-hover/60">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
         <button
+          type="button"
           aria-expanded={open}
+          aria-controls={contentId}
           onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 items-center gap-2 py-1 text-left text-[12px] text-ink-2 hover:text-ink"
+          className="flex min-w-0 flex-1 basis-32 items-center gap-2 py-1 text-left text-[12px] text-ink-2 hover:text-ink"
           data-testid="button-toggle-raw"
         >
-          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-150', !open && '-rotate-90')} />
+          <ChevronDown aria-hidden className={cn('size-3.5 shrink-0', !open && '-rotate-90')} />
           <span className="rounded-full bg-sky-strong px-1.5 py-px font-mono text-[10.5px] uppercase tracking-wider text-info-ink">raw</span>
-          {title}
+          <span className="min-w-0 [overflow-wrap:anywhere]">{title}</span>
         </button>
         <CopyButton text={text} label="Copy JSON" />
       </div>
       {open && (
-        <pre className="max-h-80 overflow-auto border-t border-dashed border-support/60 bg-panel px-3 rounded-b-[12px] py-2.5 font-mono text-[11.5px] leading-relaxed text-ink-2 whitespace-pre-wrap break-all">
+        <pre id={contentId} tabIndex={0} role="region" aria-label={title} className="min-w-0 max-w-full max-h-80 overflow-auto overscroll-contain border-t border-dashed border-support/60 bg-panel px-3 rounded-b-[12px] py-2.5 font-mono text-[11.5px] leading-relaxed text-ink-2 whitespace-pre-wrap [overflow-wrap:anywhere]">
           {text}
         </pre>
       )}

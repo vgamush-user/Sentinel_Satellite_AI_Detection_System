@@ -1,30 +1,28 @@
 import type { Incident, Reading, StateSnapshot } from '@/lib/sentinel/types';
 import type { BackendIncident } from './protocol';
 import type { BackendData } from './reducer';
+import { reportStatus as getReportStatus } from './report-status';
 
 // The supplied Python API uses time.time() seconds; the existing UI uses epoch milliseconds.
 const ms = (seconds: number | null | undefined) => seconds == null ? undefined : seconds * 1000;
 export function normalizeIncident(raw: BackendIncident, rows: Reading[]): Incident {
   const related = rows.filter(row => row.incidentId === raw.incident_id);
-  const first = ms(raw.opened_ts) ?? ms(raw.last_seen_ts) ?? 0;
-  const state = (raw.report_status ?? '').toUpperCase();
-  const status = ['FAILED', 'ERROR'].includes(state) ? 'failed'
-    : ['PENDING', 'QUEUED', 'RUNNING', 'STARTED'].includes(state) ? 'pending' : 'unavailable';
-  const reportStatus = status === 'unavailable' && (state || raw.report) ? 'ready' : status;
+  const first = ms(raw.opened_ts) ?? null;
+  const status = getReportStatus(raw.report_status, raw.report);
   return {
-    id: raw.incident_id, cls: raw.attack_class ?? 'Unknown', lifecycle: raw.status === 'closed' ? 'closed' : 'open',
-    firstSeen: first, lastSeen: ms(raw.last_seen_ts) ?? first, closedAt: ms(raw.closed_ts),
+    id: raw.incident_id, cls: raw.attack_class ?? 'Unknown', lifecycle: raw.status === 'closed' ? 'closed' : raw.status === 'open' ? 'open' : 'unknown',
+    firstSeen: first, lastSeen: ms(raw.last_seen_ts) ?? null, closedAt: ms(raw.closed_ts),
     readingIds: related.map(row => row.id), triggerReadingIds: raw.trigger_entry_ids ?? [],
-    peakConfidence: raw.peak_confidence ?? 0, meanConfidence: raw.mean_confidence ?? undefined,
+    peakConfidence: raw.peak_confidence ?? null, meanConfidence: raw.mean_confidence ?? undefined,
     rowCount: raw.row_count ?? undefined, groundTruth: raw.sample_true_class ?? undefined,
     closeReason: raw.close_reason ?? undefined, origin: related.some(row => row.source === 'threat-lab') ? 'threat-lab' : 'downlink',
     timeline: [
       ...(raw.opened_ts == null ? [] : [{ ts: raw.opened_ts * 1000, kind: 'opened' as const, label: 'Incident opened by the backend' }]),
       ...(raw.closed_ts == null ? [] : [{ ts: raw.closed_ts * 1000, kind: 'closed' as const, label: raw.close_reason ?? 'Incident closed by the backend' }]),
       ...(raw.report_started_ts == null ? [] : [{ ts: raw.report_started_ts * 1000, kind: 'report_pending' as const, label: 'Report generation started' }]),
-      ...(raw.report_finished_ts == null ? [] : [{ ts: raw.report_finished_ts * 1000, kind: status === 'failed' ? 'report_failed' as const : 'report_ready' as const, label: 'Report generation finished' }]),
+      ...(raw.report_finished_ts == null || !['failed', 'ready'].includes(status) ? [] : [{ ts: raw.report_finished_ts * 1000, kind: status === 'failed' ? 'report_failed' as const : 'report_ready' as const, label: 'Report generation finished' }]),
     ].sort((a, b) => a.ts - b.ts),
-    report: { status: reportStatus, mode: raw.report_mode === 'cached' ? 'cached' : raw.report_mode === 'live' ? 'live' : undefined,
+    report: { status, rawStatus: raw.report_status ?? undefined, mode: raw.report_mode === 'cached' ? 'cached' : raw.report_mode === 'live' ? 'live' : undefined,
       requestedAt: ms(raw.report_started_ts), generatedAt: ms(raw.report_finished_ts),
       runtimeSec: raw.report_runtime_sec ?? undefined, body: raw.report ?? undefined,
       error: status === 'failed' ? raw.report ?? 'Backend reported a failed report.' : undefined },
