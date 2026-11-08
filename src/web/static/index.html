@@ -30,21 +30,33 @@
   </header>
   <main>
     <div class="card replay-notice" id="replay-notice" hidden><p id="replay-notice-text" role="status"></p><button class="btn" id="retry-replay" type="button">Retry connection</button></div>
-<section class="grid intro-view" id="overview-view" aria-labelledby="show-overview">
-  <div class="card intro">
-    <div class="card-head"><h2 id="scenarios-heading">Start with a sample</h2><span class="badge">Cached examples · No key needed</span></div>
-    <p>Follow a CubeSat telemetry sample from prediction to review.</p>
+<section class="grid wide-workspace" id="overview-view" aria-labelledby="show-overview">
+  <section class="card telemetry-status" aria-label="Replay session">
+    <div class="replay-metric"><span>Replay session</span><strong id="overview-session" role="status">Waiting for replay status</strong></div>
+    <div class="replay-metric"><span>Dataset</span><strong id="overview-dataset">–</strong></div>
+    <div class="replay-metric"><span>Rows scored this session</span><strong id="overview-total">–</strong></div>
+    <div class="replay-metric"><span>Throughput</span><strong id="overview-rate">–</strong></div>
+  </section>
+  <section class="card scenario-library" aria-labelledby="scenarios-heading">
+    <div class="card-head"><div><p class="dashboard-label">Scenario library</p><h2 id="scenarios-heading">Choose a sample</h2></div><span class="badge">5 classes</span></div>
     <fieldset class="scenario-picker"><legend class="sr-only">Sample class</legend><div id="scenario-cards" class="scenario-cards"></div></fieldset>
-    <p id="scenario-description" class="hint"></p>
-    <div class="intro-actions">
-      <button class="btn primary" type="button" id="try-sample">Explore sample</button>
-      <button class="btn ghost" type="button" data-view="live">Explore telemetry replay</button>
-    </div>
-    <p id="scenario-status" role="status" class="hint"></p>
+  </section>
+  <div class="scenario-workspace">
+    <section class="card panel-console scenario-console" aria-labelledby="scenario-name">
+      <div class="console-heading"><p class="console-label">Selected scenario</p><span class="console-tag">Cached · No key needed</span></div>
+      <h2 id="scenario-name">Data Injection</h2>
+      <p id="scenario-description" class="console-source"></p>
+      <div class="scenario-actions">
+        <button class="btn primary" type="button" id="try-sample">Explore sample</button>
+        <button class="btn console-secondary" type="button" data-view="live">Open Telemetry</button>
+      </div>
+      <ol class="scenario-route" aria-label="Walkthrough sections">
+        <li><span>01</span> Prediction</li><li><span>02</span> Evidence</li><li><span>03</span> Policy</li><li><span>04</span> Narrative</li>
+      </ol>
+      <p id="scenario-status" role="status" class="console-source"></p>
+    </section>
+    <div class="card" id="scenario-result" tabindex="-1" hidden></div>
   </div>
-  <div class="card scenarios" id="scenario-result" tabindex="-1" hidden>
-  </div>
-  <div class="card session-summary"><h2>Replay session</h2><p id="overview-session" role="status">Waiting for replay status.</p><dl class="inspector-facts"><div><dt>Dataset</dt><dd id="overview-dataset">–</dd></div><div><dt>Rows scored</dt><dd id="overview-total">–</dd></div><div><dt>Throughput</dt><dd id="overview-rate">–</dd></div></dl><button class="btn ghost" type="button" data-view="live">Open Telemetry</button></div>
 </section>
 
 <section class="grid intro-view" id="method-view" aria-labelledby="show-method" hidden>
@@ -199,47 +211,68 @@
   </aside>
 </section>
 
-<section class="grid" id="lab-view" aria-labelledby="show-lab" hidden>
+<section class="grid wide-workspace" id="lab-view" aria-labelledby="show-lab" hidden>
   <section class="card lab-modes" aria-label="Threat Lab workflows">
-    <div><h2>Simulate a scenario</h2><p>Send a burst of labeled attack samples through the replay pipeline.</p>
+    <div><div><p class="dashboard-label">01 · Labeled samples</p><h2>Simulate a scenario</h2><p>Send a burst of attack samples through the replay pipeline.</p></div>
       <button class="btn primary" id="show-simulation" type="button">Run simulation</button></div>
-    <div><h2>Test a telemetry entry</h2><p>Load a dataset row, optionally edit its features, then send it once or as a burst.</p>
+    <div><div><p class="dashboard-label">02 · Custom input</p><h2>Test a telemetry entry</h2><p>Load a dataset row, edit features if needed, then send it once or as a burst.</p></div>
       <button class="btn" type="button" id="show-entry-editor" aria-controls="card-test" aria-expanded="false">Open entry editor</button></div>
   </section>
-  <section class="card" id="card-test" hidden>
-    <div class="card-head"><h2 id="entry-heading" tabindex="-1">Test a telemetry entry</h2></div>
-    <div class="row">
-      <label>Start from
-        <select id="t-class"></select>
-      </label>
-      <label>Quality
-        <select id="t-quality">
-          <option value="clean">Clean</option>
-          <option value="noisy">Noisy</option>
-        </select>
-      </label>
-      <button class="btn ghost" id="t-load">Load sample</button>
-      <button class="btn ghost" id="t-use-loaded" type="button" hidden>Use loaded sample</button>
-    </div>
-    <div class="sample-provenance">
-      <p class="hint" id="t-origin">No sample loaded.</p>
-      <p class="hint" id="t-ground-truth"></p>
-      <p class="hint" id="t-load-status" role="status"></p>
-    </div>
-    <div class="row send-row">
-      <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
-      <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst</label>
-      <label id="burst-count" hidden>Burst row count <input id="t-burst" type="number" min="2" max="50" step="1" value="10" required disabled aria-describedby="t-burst-range"></label>
-      <span class="hint" id="t-burst-range" hidden>2–50 rows</span>
-      <button class="btn primary" id="t-send" disabled>Send entry</button>
-    </div>
-    <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
-    <details id="feature-editor"><summary>Edit feature values</summary><div id="t-features"></div></details>
+  <section class="card lab-ready" id="lab-ready">
+    <p class="dashboard-label">Input workspace</p>
+    <h2>Prepare a telemetry test</h2>
+    <p class="hint">Choose a labeled simulation or open the entry editor above. Both send test data through the same replay pipeline.</p>
+    <ol class="lab-guide">
+      <li><strong>Choose input</strong><span>Use labeled attack samples or start from a dataset row.</span></li>
+      <li><strong>Review and send</strong><span>Edited features make dataset ground truth unavailable for that entry.</span></li>
+      <li><strong>Inspect the result</strong><span>Follow scoring, the incident decision, and report availability in Run progress.</span></li>
+    </ol>
+  </section>
+  <section class="card lab-editor" id="card-test" hidden>
+    <div class="card-head"><div><p class="dashboard-label">Input workspace</p><h2 id="entry-heading" tabindex="-1">Entry editor</h2></div><span class="badge">Injected test</span></div>
+    <section class="editor-section" aria-labelledby="editor-source">
+      <h3 id="editor-source">01 · Choose a sample</h3>
+      <div class="row">
+        <label>Start from
+          <select id="t-class"></select>
+        </label>
+        <label>Quality
+          <select id="t-quality">
+            <option value="clean">Clean</option>
+            <option value="noisy">Noisy</option>
+          </select>
+        </label>
+        <button class="btn ghost" id="t-load">Load sample</button>
+        <button class="btn ghost" id="t-use-loaded" type="button" hidden>Use loaded sample</button>
+      </div>
+      <div class="sample-provenance">
+        <p class="hint" id="t-origin">No sample loaded.</p>
+        <p class="hint" id="t-ground-truth"></p>
+        <p class="hint" id="t-load-status" role="status"></p>
+      </div>
+    </section>
+    <section class="editor-section" aria-labelledby="editor-features">
+      <h3 id="editor-features">02 · Review features</h3>
+      <details id="feature-editor"><summary>Edit feature values</summary><div id="t-features"></div></details>
+    </section>
+    <section class="editor-section" aria-labelledby="editor-send">
+      <h3 id="editor-send">03 · Submit test data</h3>
+      <div class="row send-row">
+        <label class="radio"><input type="radio" name="t-mode" value="once" checked> Send once</label>
+        <label class="radio"><input type="radio" name="t-mode" value="burst"> Burst</label>
+        <label id="burst-count" hidden>Burst row count <input id="t-burst" type="number" min="2" max="50" step="1" value="10" required disabled aria-describedby="t-burst-range"></label>
+        <span class="hint" id="t-burst-range" hidden>2–50 rows</span>
+        <button class="btn primary" id="t-send" disabled>Send entry</button>
+      </div>
+      <p class="hint">A single entry is classified instantly, but an incident needs <b class="g-rows">5</b> attack rows within the last <b class="g-win">20</b>, so a single entry alone cannot open an incident.</p>
+    </section>
   </section>
 
-  <section class="card" id="card-tracker">
-    <p class="dashboard-label">Pipeline activity</p>
-    <div class="card-head"><h2>Run progress</h2><small id="tr-title">No runs yet</small></div>
+  <section class="card panel-console" id="card-tracker">
+    <header class="tracker-head">
+      <p class="console-label">Pipeline activity</p>
+      <h2>Run progress</h2><p class="console-source" id="tr-title">No runs yet</p>
+    </header>
     <ol class="tracker" id="tracker">
       <li class="wait"><b>Submitted</b><span>Send a telemetry entry or run a simulation</span></li>
       <li class="wait"><b>Scored</b><span></span></li>

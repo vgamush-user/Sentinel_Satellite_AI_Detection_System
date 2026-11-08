@@ -151,7 +151,11 @@ function setupOverview() {
   cards.innerHTML = Object.keys(scenarios).map((name) => `
     <label class="scenario-option"><input type="radio" name="scenario" value="${name}" ${name === "Data Injection" ? "checked" : ""}><span>${name}</span></label>`).join("");
   const selectedSample = () => cards.querySelector(":checked").value;
-  const describeSample = () => { $("scenario-description").textContent = scenarios[selectedSample()]; };
+  const describeSample = () => {
+    const name = selectedSample();
+    $("scenario-name").textContent = name;
+    $("scenario-description").textContent = scenarios[name];
+  };
   cards.addEventListener("change", describeSample);
   describeSample();
   let cache;
@@ -204,7 +208,9 @@ function renderScenario(name, example) {
   const classification = example.classification;
   const result = $("scenario-result");
   result.innerHTML = `
-    <div class="card-head"><h3>${esc(name)} walkthrough</h3><span class="badge">Cached example</span></div>
+    <div class="sample-result-heading"><p class="dashboard-label">Prediction record</p>
+      <div class="card-head"><h3>${esc(name)} walkthrough</h3><span class="badge">Cached example</span></div>
+    </div>
     ${resultSections({
       prediction: `<dl class="result-facts">
         ${fact("Predicted class", classification?.predicted_class)}
@@ -216,7 +222,7 @@ function renderScenario(name, example) {
         <p class="hint">Raw telemetry and the Monitor decision are unavailable for this cached example.</p>`,
       policy: `<p class="hint">Structured policy details are unavailable. The cached explanation describes simulated actions.</p>
         ${outputDetails("Policy explanation · AI-generated", example.mitigation)}`,
-      narrative: outputDetails("Incident narrative", example.report) + outputDetails("SPARTA threat context", example.sparta_context)
+      narrative: outputDetails("SPARTA context · AI-generated", example.sparta_context) + outputDetails("Incident narrative", example.report)
         || '<p class="hint">Narrative unavailable.</p>',
     })}`;
   result.hidden = false;
@@ -296,6 +302,7 @@ function setupStatic() {
   $("show-entry-editor").addEventListener("click", () => {
     const editor = $("card-test");
     editor.hidden = !editor.hidden;
+    $("lab-ready").hidden = !editor.hidden;
     $("show-entry-editor").setAttribute("aria-expanded", String(!editor.hidden));
     $("show-entry-editor").textContent = editor.hidden ? "Open entry editor" : "Hide entry editor";
     if (!editor.hidden) $("entry-heading").focus();
