@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Link, useLocation } from 'wouter';
 import { Activity, FlaskConical, LayoutGrid, Menu, MoreHorizontal, Pause, Play, PlugZap, RotateCcw, ScanSearch, ShieldAlert, SkipForward, Unplug, X } from 'lucide-react';
@@ -11,6 +11,7 @@ import { SOURCE_FALLBACK, SOURCE_SETTING } from '@/lib/sentinel/adapter';
 import { Btn } from './kit';
 import { SourceSettings } from './source-settings';
 import { useBackend } from '@/lib/backend/context';
+import { isFeedStale } from '@/lib/sentinel/freshness';
 
 const NAV = [
   { href: '/', label: 'Overview', icon: LayoutGrid },
@@ -90,19 +91,18 @@ function ConnectionStatus() {
   const age = client
     ? data?.stats.last_row_age_sec == null ? null : data.stats.last_row_age_sec * 1000 + (statsReceivedAt ? now - statsReceivedAt : 0)
     : s.lastReceivedAt ? now - s.lastReceivedAt : null;
-  const stale = s.connection === 'disconnected' || s.connection === 'reconnecting' || (!!client && s.stats?.kafkaOk === false);
+  const stale = isFeedStale({ connection: s.connection, backend: !!client, kafkaOk: s.stats?.kafkaOk, ageMs: age });
   const tone =
-    s.connection === 'connected' ? (client ? s.stats?.kafkaOk ? 'bg-mint' : 'bg-amber' : s.playback?.playing ? 'bg-mint' : 'bg-ink-3') : s.connection === 'disconnected' ? 'bg-rose' : 'bg-amber';
+    s.connection === 'disconnected' ? 'bg-rose' : stale ? 'bg-amber' : s.connection === 'connected' ? (client ? s.stats?.kafkaOk ? 'bg-mint' : 'bg-amber' : s.playback?.playing ? 'bg-mint' : 'bg-ink-3') : 'bg-amber';
   const text = { connecting: 'Connecting', connected: 'Connected', disconnected: 'Disconnected', reconnecting: 'Reconnecting' }[s.connection];
   return (
-    <div className="flex min-w-0 items-center gap-2 text-[12.5px]" data-testid="status-connection">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]" data-testid="status-connection">
       <span className="relative flex size-2 shrink-0">
-        {s.connection === 'connected' && s.playback?.playing && <span className="absolute inset-0 animate-ping rounded-full bg-mint/50 [animation-duration:2.4s]" />}
         <span className={cn('relative size-2 rounded-full', tone)} />
       </span>
-      <span className="font-medium text-ink">{client ? transport === 'connected' ? s.stats?.kafkaOk ? 'Kafka connected' : 'Kafka unavailable' : `Backend ${transport}` : `Feed ${text.toLowerCase()}`}</span>
-      {stale && <span className="rounded-full bg-peach px-2 text-[11px] font-medium text-amber">Stale data</span>}
-      <span className="hidden truncate text-ink-3 sm:inline tnum" data-testid="text-freshness">
+      <span className="font-medium text-ink">{client ? transport === 'connected' ? s.stats?.kafkaOk == null ? 'Kafka status unknown' : s.stats.kafkaOk ? 'Kafka connected' : 'Kafka unavailable' : `Backend ${transport}` : s.playback && !s.playback.playing && s.connection === 'connected' ? 'Replay paused' : `Feed ${text.toLowerCase()}`}</span>
+      {stale && <span role="status" className="rounded-full bg-peach px-2 text-[11px] font-medium text-amber">Stale data</span>}
+      <span className="text-ink-3 tnum" data-testid="text-freshness">
         {s.status === 'loading' ? 'Waiting for telemetry' : age != null ? `Last reading ${fmtAge(age)}` : 'No readings yet'}
       </span>
     </div>
@@ -231,12 +231,26 @@ function StaleBanner() {
   return null;
 }
 
+function SampleRecoveryNotice() {
+  const notice = useSentinel().config?.recoveryNotice;
+  if (!notice) return null;
+  return <p role="status" className="border-b border-peach-strong bg-peach px-4 py-2 text-[12.5px] text-amber md:px-7">{notice}</p>;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [drawer, setDrawer] = useState(false);
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!header.current) return;
+    const observer = new ResizeObserver(entries => document.documentElement.style.setProperty('--shell-header-height', `${entries[0].contentRect.height}px`));
+    observer.observe(header.current);
+    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--shell-header-height'); };
+  }, []);
   const { client, error } = useBackend();
   useNow(2000);
   return (
     <div className="min-h-[100dvh] bg-canvas text-ink">
+      <a href="#main-content" className="skip-link" onClick={() => document.getElementById('main-content')?.focus()}>Skip to main content</a>
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[216px] flex-col border-r border-divider bg-nav px-3 py-4 lg:flex">
         <Link href="/" className="mb-6 flex items-center gap-2.5 px-1.5" data-testid="link-home">
           <Mark className="size-7" />
@@ -249,8 +263,8 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="lg:pl-[216px]">
-        <header className="sticky top-0 z-20 border-b border-divider bg-canvas/90 backdrop-blur-[6px]">
-          <div className="flex h-12 items-center gap-3 px-3 md:px-7">
+        <header ref={header} className="sticky top-0 z-20 border-b border-divider bg-canvas/90 backdrop-blur-[6px]">
+          <div className="flex min-h-12 flex-wrap items-center gap-3 px-3 py-1.5 md:px-7">
             <Dialog.Root open={drawer} onOpenChange={setDrawer}>
               <Dialog.Trigger asChild>
                 <Btn variant="ghost" size="sm" aria-label="Open navigation" className="lg:hidden h-9 w-9 px-0" data-testid="button-open-nav">
@@ -270,9 +284,11 @@ export function Shell({ children }: { children: ReactNode }) {
                       </Btn>
                     </Dialog.Close>
                   </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <NavList onNavigate={() => setDrawer(false)} />
-                  <div className="mt-auto">
+                  <div className="mt-5">
                     <SidebarFooter />
+                  </div>
                   </div>
                 </Dialog.Content>
               </Dialog.Portal>
@@ -294,9 +310,10 @@ export function Shell({ children }: { children: ReactNode }) {
             <PlaybackControls />
           </div>
           <StaleBanner />
+          <SampleRecoveryNotice />
           {client && error && <div role="alert" className="border-b border-rose/30 bg-blush px-4 py-2 text-[12.5px] text-rose md:px-7">{error} <button className="underline" onClick={() => client.reconnect()}>Retry connection</button></div>}
         </header>
-        <main className="mx-auto w-full max-w-[1600px] px-4 py-6 md:px-7">{children}</main>
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1600px] px-4 py-6 md:px-7">{children}</main>
       </div>
     </div>
   );
