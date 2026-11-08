@@ -28,6 +28,8 @@ from streaming.config import (AGENT_MODE, BOOTSTRAP, CLASS_NAMES, DATASETS, FEAT
                               TOPIC_REPORTS, TOPIC_SCORED, WEB_HOST, WEB_PORT, from_bytes, log, make_consumer)
 from streaming import inject, storage
 from streaming.topics import ensure_topics
+from web.analysis import router as analysis_router, stop_replay
+from ml.app import predict_anomaly
 
 STATIC = Path(__file__).resolve().parent / "static"
 FRONTEND = STATIC.parents[2] / "frontend" / "dist"
@@ -210,9 +212,12 @@ async def lifespan(app: FastAPI):
     yield
     task.cancel()
     bridge.stop.set()
+    stop_replay()
 
 
 app = FastAPI(title="Sentinel live monitor", lifespan=lifespan)
+app.include_router(analysis_router)
+app.post("/api/analysis/predict")(predict_anomaly)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 

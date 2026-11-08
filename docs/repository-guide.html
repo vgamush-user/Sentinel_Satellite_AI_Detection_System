@@ -26,7 +26,7 @@ p{max-width:76ch;color:var(--muted)}nav,.grid{display:flex;flex-wrap:wrap;gap:.7
 <section id="paths">
 <h2>Two paths share a model</h2>
 <div class="grid">
-<article class="card"><span class="tag">01 / STANDALONE</span><h3>Gate each row, then classify</h3><p><a href="../src/pipeline/full_pipeline.py">full_pipeline.py</a> drives a CSV simulator, checks for unusual features, and runs the crew on rows that pass. <a href="../src/dashboard/app.py">The Gradio dashboard</a> offers another way to use this workflow.</p></article>
+<article class="card"><span class="tag">01 / STANDALONE</span><h3>Gate each row, then classify</h3><p><a href="../src/pipeline/full_pipeline.py">full_pipeline.py</a> drives a CSV simulator, checks for unusual features, and runs the crew on rows that pass. <a href="../frontend/src/ManualAnalysis.tsx">The React manual-analysis view</a> offers another way to use this workflow.</p></article>
 <article class="card"><span class="tag">02 / STREAMING</span><h3>Classify each row, then group</h3><p><a href="../scripts/start_all.py">start_all.py</a> launches Kafka services and the <a href="../src/web/server.py">FastAPI website</a>. The detector scores every row. An incident must open before the agent worker is called.</p></article>
 </div>
 <p>Both load the same <a href="../src/ml/baseline_xgb.json">XGBoost model</a> and <a href="../src/ml/baseline_feature_order.json">ordered feature list</a>. The standalone monitor uses separate <a href="../src/ml/nominal_baseline_stats.json">nominal statistics</a>.</p>
@@ -72,8 +72,8 @@ p{max-width:76ch;color:var(--muted)}nav,.grid{display:flex;flex-wrap:wrap;gap:.7
 </dl></details>
 <details><summary>Infrastructure and interfaces</summary><dl>
 <dt><a href="../docker-compose.yml">docker-compose.yml</a> · <a href="../scripts/start_all.py">start_all.py</a> · <a href="../requirements.txt">requirements.txt</a></dt><dd>Compose defines the broker and Kafka UI. The launcher starts the host Python processes, whose dependencies are listed in requirements.txt.</dd>
-<dt><a href="../src/dashboard/app.py">Gradio dashboard</a> · <a href="../src/web/static/style.css">Kafka website stylesheet</a></dt><dd>Gradio connects to the simulator. The stylesheet belongs to the separate FastAPI website.</dd>
-<dt><a href="../src/dashboard/dashboard.py">Streamlit dashboard</a> → <a href="../src/ml/app.py">older prediction API</a></dt><dd>A separate five-feature demo whose API expects external scaler and model pickle files. The Kafka stack uses the 22-feature JSON model.</dd>
+<dt><a href="../frontend/src/ManualAnalysis.tsx">React manual-analysis view</a> · <a href="../src/web/static/style.css">Kafka website stylesheet</a></dt><dd>The React view connects to the simulator through FastAPI.</dd>
+<dt><a href="../frontend/src/ManualAnalysis.tsx">Five-feature packet test</a> → <a href="../src/ml/app.py">older prediction API</a></dt><dd>A separate five-feature demo whose API expects external scaler and model pickle files. The Kafka stack uses the 22-feature JSON model.</dd>
 </dl></details>
 <details><summary>Tests and project documentation</summary><dl>
 <dt><a href="../tests/test_monitor.py">Monitor</a> · <a href="../tests/test_mitigation_boundaries.py">Mitigation boundaries</a> · <a href="../tests/test_integration_all_scenarios.py">Integration scenarios</a> · <a href="../tests/run_adversarial_tests.py">Adversarial checks</a></dt><dd>Exercise the gate, policy thresholds, five class scenarios, and selected difficult inputs. Integration defaults to cached reports and offers a live Groq option.</dd>

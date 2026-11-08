@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState }
 import { createRoot } from "react-dom/client";
 import { Incidents, type Selection } from "./Incidents";
 import { Overview, Method } from "./Overview";
+import { ManualAnalysis } from "./ManualAnalysis";
 import { Telemetry, type Snapshot } from "./Telemetry";
 import { ThreatLab } from "./ThreatLab";
 import { incident, request, type Decision, type Incident, type Row } from "./protocol";
@@ -9,9 +10,9 @@ import { focus } from "./presentation";
 import { useReplay } from "./useReplay";
 import "../../src/web/static/style.css";
 
-const titles = { overview: "Overview", live: "Telemetry", incidents: "Incidents", lab: "Threat Lab", method: "How it works" };
+const titles = { overview: "Overview", live: "Telemetry", incidents: "Incidents", lab: "Threat Lab", analysis: "Manual analysis", method: "How it works" };
 type View = keyof typeof titles;
-const routes: Record<View, string> = { overview: "overview", live: "telemetry", incidents: "incidents", lab: "threat-lab", method: "how-it-works" };
+const routes: Record<View, string> = { overview: "overview", live: "telemetry", incidents: "incidents", lab: "threat-lab", analysis: "manual-analysis", method: "how-it-works" };
 const readView = (): View => (Object.keys(routes) as View[]).find(view => "#" + routes[view] === location.hash) ?? "overview";
 const emptyRows: Row[] = [];
 const emptyClasses: string[] = [];
@@ -128,7 +129,7 @@ function App() {
     <button type="button" className="btn" id="show-lab" aria-controls="lab-view" aria-pressed={view === "lab"} onClick={() => navigate("lab", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M7 2h4M8 2v5l-4 7a1 1 0 0 0 1 2h8a1 1 0 0 0 1-2l-4-7V2M6 11h6" /></svg>Threat Lab</button>
     <span className="nav-section" aria-hidden="true">Learn</span>
     <button type="button" className="btn" id="show-method" aria-controls="method-view" aria-pressed={view === "method"} onClick={() => navigate("method", "workspace-title")}><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="9" cy="9" r="6" /><path d="M9 8v4M9 5.5v1" /></svg>How it works</button>
-    <a className="btn" href="https://huggingface.co/spaces/Amuthavel2402/Sentinel_Satellite" target="_blank" rel="noopener"><svg aria-hidden="true" viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M10 3h5v5m0-5-7 7m5 0v5H3V5h5" /></svg>Analyze in hosted demo<span className="sr-only"> (opens in a new tab)</span></a>
+    <button type="button" className="btn" id="show-analysis" aria-controls="analysis-view" aria-pressed={view === "analysis"} onClick={() => navigate("analysis", "workspace-title")}>Manual analysis</button>
   </nav>
 </aside>
 
@@ -139,7 +140,7 @@ function App() {
   </header>
   <main>
     <div className="card replay-notice" id="replay-notice" hidden={!error}><p id="replay-notice-text" role="status">Replay is unavailable. Cached samples can still be explored.</p><button className="btn" id="retry-replay" disabled={loading} onClick={retry} type="button">Retry connection</button></div>
-<Overview hidden={view !== "overview"} stats={data?.stats} stale={stale} error={error} openTelemetry={() => navigate("live", "workspace-title")} /><Method hidden={view !== "method"} /><Telemetry hidden={view !== "live"} recent={recent} snapshot={snapshot} setSnapshot={setSnapshot} stats={data?.stats} stale={stale} config={data?.config} theme={theme} openIncidents={() => navigate("incidents", "incidents-heading")} backIncident={backIncident} /><Incidents hidden={view !== "incidents"} incidents={incidents} classes={data?.config.classes ?? emptyClasses} loaded={!!data} error={error} selection={selection} open={openIncident} close={closeIncident} snapshot={openSnapshot} /><ThreatLab hidden={view !== "lab"} config={data?.config} recent={recent} incidents={incidents} decisions={data?.decisions ?? emptyDecisions} notify={notify} openIncident={openIncident} /></main>
+<Overview hidden={view !== "overview"} stats={data?.stats} stale={stale} error={error} openTelemetry={() => navigate("live", "workspace-title")} /><Method hidden={view !== "method"} /><ManualAnalysis hidden={view !== "analysis"} /><Telemetry hidden={view !== "live"} recent={recent} snapshot={snapshot} setSnapshot={setSnapshot} stats={data?.stats} stale={stale} config={data?.config} theme={theme} openIncidents={() => navigate("incidents", "incidents-heading")} backIncident={backIncident} /><Incidents hidden={view !== "incidents"} incidents={incidents} classes={data?.config.classes ?? emptyClasses} loaded={!!data} error={error} selection={selection} open={openIncident} close={closeIncident} snapshot={openSnapshot} /><ThreatLab hidden={view !== "lab"} config={data?.config} recent={recent} incidents={incidents} decisions={data?.decisions ?? emptyDecisions} notify={notify} openIncident={openIncident} /></main>
 </div>
 </div>
 

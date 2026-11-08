@@ -62,7 +62,7 @@ export function Overview({ hidden, stats, stale, error, openTelemetry }: {
       setStatus("");
       if (document.activeElement === trigger) focus("scenario-result");
     } catch {
-      if (generation.current === id) setStatus("This cached scenario couldn’t load. Try again or open the hosted demo.");
+      if (generation.current === id) setStatus("This cached scenario couldn’t load. Try again or open Manual analysis.");
     }
   }
   return (<section className="grid wide-workspace" id="overview-view" aria-labelledby="show-overview" hidden={hidden}>
@@ -111,7 +111,7 @@ export const Method = memo(function Method({ hidden }: { hidden: boolean }) {
     </table>
   </section>
   <section className="card methodology">
-    <h2>Hosted demo · Five-stage analysis</h2>
+    <h2>Manual analysis · Five-stage workflow</h2>
     <ol className="agent-trace">
       <li><strong>Monitor</strong><span>Statistical screening against the nominal baseline.</span></li>
       <li><strong>Classifier</strong><span>XGBoost predicts a class. The agent presents the model output.</span></li>

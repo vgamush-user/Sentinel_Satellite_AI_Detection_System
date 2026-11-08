@@ -91,9 +91,6 @@ Sentinel_Satellite_AI_Detection_System/
 │   ├── pipeline/
 │   │   └── monitor_pipeline.py
 │   │
-│   ├── dashboard/
-│   │   └── app.py                       # Gradio dashboard (manual, click-to-analyse)
-│   │
 │   ├── streaming/                       # real-time Kafka pipeline
 │   │   ├── config.py                    # topics, guards, settings (all overridable via env)
 │   │   ├── topics.py                    # creates the 4 Kafka topics
@@ -106,6 +103,7 @@ Sentinel_Satellite_AI_Detection_System/
 │   │   └── storage.py                   # SQLite schema + queries
 │   │
 │   ├── web/                             # live website (FastAPI + WebSocket)
+│   │   ├── analysis.py                  # Manual replay and agent analysis API
 │   │   ├── server.py
 │   │   └── static/                      # shared dashboard stylesheet
 │   │
@@ -158,11 +156,11 @@ python src/pipeline/full_pipeline.py
 ```
 Streams rows from `data/noised/noised_dataset.csv`, gates them through the Monitor Agent (free), and runs the full Classifier → SPARTA Analyst → Mitigation → Incident Reporter chain (4 Groq calls) on whatever escalates. Capped at a small row count by default — each escalated row costs real API quota.
 
-### 6. Run the dashboard
-```bash
-python src/dashboard/app.py
-```
-Open the printed local URL. Click **Start** to stream telemetry live, **🔍 Run Full Agent Analysis** to manually trigger the agent pipeline on the latest row (costs 4 Groq calls), or use the **Demo Mode** buttons for instant, zero-cost cached examples.
+### 6. Open the React dashboard
+
+Build and launch the live dashboard using the streaming stack instructions below. In **Manual analysis**, select a dataset, start the shared CSV replay, and inspect the rolling metrics, recent rows, and Monitor result. **Run full agent analysis** uses the latest replay row at submission and requires live agent mode and a Groq API key. Overview has precomputed scenarios for cached mode.
+
+The **Five-feature packet test** uses the original Phase 4 predictor on the same FastAPI server. Place trusted copies of `telemetry_scaler.pkl` and `xgb_phase4_model.pkl` in a directory named by the `PHASE4_MODEL_DIR` environment variable. The predictor defaults to its current working directory, which is `src/` when launched by `scripts/start_all.py`. These artifacts are external to the repository. The standard Threat Lab uses the separate 22-feature model and works without them.
 
 ### 7. Regenerate the cached demo examples (only if you edit the agents/tools)
 ```bash
