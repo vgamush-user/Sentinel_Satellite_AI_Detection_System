@@ -168,20 +168,25 @@ export class BackendClient {
   }
   reconnect() { this.stop(); this.update({ transport: 'reconnecting' }); this.start(); }
   async initial(): Promise<BackendInitial> {
+    const generation = this.generation;
     try {
       const snapshot = await this.probe();
+      if (generation !== this.generation) throw new Error('Connection changed before synchronization completed.');
       this.update({ data: hydrate(this.state.data, snapshot, []), syncVersion: this.state.syncVersion + 1, error: null });
       this.start();
       return snapshot;
     } catch (error) {
+      if (generation !== this.generation) throw error;
       // Deep-linked screens rely on the shared shell for initial API failures.
       this.update({ error: error instanceof Error ? error.message : 'Could not load backend state.', transport: 'disconnected' });
       throw error;
     }
   }
   async incident(id: string) {
+    const generation = this.generation;
     const baseline = this.state.data?.incidents.find(incident => incident.incident_id === id);
     const value = await this.request('/api/incidents/' + encodeURIComponent(id), incidentSchema);
+    if (generation !== this.generation) throw new Error('Connection changed before incident lookup completed. Retry the lookup.');
     if (this.state.data) {
       const map = new Map(this.state.data.incidents.map(i => [i.incident_id, i]));
       map.set(id, mergeStored(map.get(id), value, baseline));

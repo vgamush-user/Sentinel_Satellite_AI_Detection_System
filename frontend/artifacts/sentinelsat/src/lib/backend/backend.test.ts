@@ -263,3 +263,21 @@ test('initial HTTP failure reaches the shared connection state on every route', 
   assert.match(client.get().error ?? '', /non-JSON/);
   assert.equal(client.get().data, null);
 });
+
+test('obsolete initial and incident responses cannot repopulate a stopped connection', async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let finish!: (response: Response) => void;
+  globalThis.fetch = (() => new Promise<Response>(resolve => { finish = resolve; })) as typeof fetch;
+  const client = new BackendClient('https://example.test');
+  const pending = client.initial();
+  client.stop();
+  finish(Response.json(initial()));
+  await assert.rejects(pending, /Connection changed/);
+  assert.equal(client.get().data, null);
+  const lookup = client.incident('incident-A');
+  client.stop();
+  finish(Response.json(initial().incidents[0]));
+  await assert.rejects(lookup, /Connection changed/);
+  assert.equal(client.get().data, null);
+});
