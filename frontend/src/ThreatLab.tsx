@@ -91,6 +91,7 @@ export function ThreatLab({ hidden, config, recent, decisions, incidents, notify
   const [invalid, setInvalid] = useState<string[]>([]);
   const [burst, setBurst] = useState(false);
   const [pending, setPending] = useState(false);
+  const submitting = useRef(false);
   const [run, setRun] = useState<Run>();
   const [previous, setPrevious] = useState<Run>();
   const sampleRequest = useRef<AbortController | undefined>(undefined);
@@ -169,7 +170,8 @@ export function ThreatLab({ hidden, config, recent, decisions, incidents, notify
     });
   }, [recent, decisions, run?.ids]);
   async function submit(url: string, payload: object, label: string, trueClass: string | null, prefix: string, button: string) {
-    if (pending) return;
+    if (submitting.current) return;
+    submitting.current = true;
     if (run?.ids && run.rows.size >= run.ids.length && (runIncident(run, incidents) || run.decisions.size >= run.ids.length)) setPrevious(run);
     setPending(true);
     const next: Run = { label, trueClass, rows: new Map(), decisions: new Map() };
@@ -184,6 +186,7 @@ export function ThreatLab({ hidden, config, recent, decisions, incidents, notify
       setRun({ ...next, error: message });
       notify(message);
     } finally {
+      submitting.current = false;
       setPending(false);
       if (document.activeElement === document.body && !document.getElementById("lab-view")?.hidden) focus(button);
     }
