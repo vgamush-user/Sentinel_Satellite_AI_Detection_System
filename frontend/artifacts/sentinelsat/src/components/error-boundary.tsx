@@ -1,5 +1,7 @@
 import {
   Component,
+  useEffect,
+  useRef,
   type ComponentType,
   type ErrorInfo,
   type ReactNode,
@@ -36,15 +38,19 @@ function toError(value: unknown): Error {
 }
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    document.title = 'View unavailable · SentinelSat';
+    heading.current?.focus();
+  }, []);
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
       <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
+        <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold text-gray-900">
           Something went wrong
         </h1>
         <p className="mt-2 text-sm text-gray-600">
-          This part of the app hit an error. The rest of the app is still
-          running.
+          This view could not be displayed. Try again, or reload the dashboard if the problem continues.
         </p>
         {/* Dev only: messages can carry API responses and other internals. */}
         {import.meta.env.DEV ? (
