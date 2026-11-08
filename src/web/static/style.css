@@ -327,7 +327,7 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 .toast-close:hover { color: var(--text); }
 
-@media (max-width: 1050px) {
+@media (max-width: 980px) {
   #incidents-view { grid-template-columns: minmax(0, 1fr); }
   .has-detail #card-incidents { display: none; }
   .drawer { position: static; max-height: none; }
@@ -536,6 +536,8 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 .telemetry-status.is-stale .replay-metric:not(:has(#pill-kafka)) { color: var(--muted); }
 .telemetry-status.is-stale .replay-metric:first-child > span::after { content: " · Last received"; }
 .telemetry-row[aria-pressed="true"] { background: var(--panel-2); box-shadow: inset 2px 0 var(--accent); }
+.queue-filters summary { cursor: pointer; padding: var(--space-2); }
+.queue-filter-fields { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 #method-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #method-view .methodology:last-child { grid-column: 1 / -1; }
 #method-view .agent-trace { grid-template-columns: 1fr; }

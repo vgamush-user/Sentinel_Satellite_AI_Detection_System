@@ -334,8 +334,8 @@ function setupStatic() {
     });
   }
   $("back-incident").addEventListener("click", () => {
-    const { id, rows, incidentOpener } = S.evidence;
-    openDrawer(id, rows, incidentOpener);
+    const { id, rows, incidentOpener, disclosures } = S.evidence;
+    openDrawer(id, rows, incidentOpener, disclosures);
   });
 
   window.addEventListener("resize", drawChart);
@@ -609,9 +609,10 @@ function drawChart() {
 
 function showEvidence(selection, triggerIds, matching) {
   const first = matching[0];
+  selection.disclosures = [...$("dr-body").querySelectorAll("details[open] > summary")].map((summary) => summary.textContent);
   closeDrawer(false);
   showSnapshot({ id: selection.id, rows: selection.rows, triggerIds, first,
-    last: matching.at(-1), selected: first, matchingCount: matching.length, incidentOpener: selection.opener });
+    last: matching.at(-1), selected: first, matchingCount: matching.length, incidentOpener: selection.opener, disclosures: selection.disclosures });
 }
 
 function showSnapshot(snapshot) {
@@ -717,7 +718,9 @@ function renderIncidents() {
   const list = all.filter((i) => (!attackClass || i.attack_class === attackClass)
     && (!state || i.status === state) && (!report || reportState(i) === report)
     && (!query || [i.incident_id, i.attack_class].some((value) => value?.toLowerCase().includes(query))));
-  $("clear-filters").hidden = !(search || attackClass || state || report);
+  const filtersApplied = [attackClass, state, report].filter(Boolean).length;
+  $("filter-count").textContent = filtersApplied ? "(" + filtersApplied + " applied)" : "";
+  $("clear-filters").hidden = !(search || filtersApplied);
   $("inc-count").textContent = `${list.length} of ${all.length} loaded · ${list.filter((i) => i.status === "open").length} open`;
   const focused = document.activeElement;
   const groups = ["open", "closed"].map((status) => {
@@ -733,7 +736,11 @@ function renderIncidents() {
       </button>`).join("")}
     </section>`;
   }).join("");
-  $("incidents").innerHTML = groups || `<div class="queue-empty"><strong>${all.length ? "No matching incidents" : "No incidents yet"}</strong><p>${all.length ? "Clear or change the filters to see more incidents." : "New incidents appear here when telemetry meets the detection criteria."}</p></div>`;
+  const markup = groups || `<div class="queue-empty"><strong>${all.length ? "No matching incidents" : "No incidents yet"}</strong><p>${all.length ? "Clear or change the filters to see more incidents." : "New incidents appear here when telemetry meets the detection criteria."}</p></div>`;
+  const queue = $("incidents");
+  if (queue.dataset.rendered === markup) return;
+  queue.innerHTML = markup;
+  queue.dataset.rendered = markup;
   if (focused.matches(".inc")) restoreIncidentFocus(focused);
 }
 
@@ -769,11 +776,12 @@ function md(text) {
   return html;
 }
 
-async function openDrawer(id, evidenceRows, opener = document.activeElement) {
+async function openDrawer(id, evidenceRows, opener = document.activeElement, snapshotDisclosures = null) {
   const selection = {
     id,
     rows: evidenceRows ?? [...new Map(S.recent.map((row) => [row.entry_id, row])).values()],
     opener,
+    snapshotDisclosures,
   };
   const cached = S.incidents.get(id) || {};
   drawerSelection = selection;
@@ -782,7 +790,8 @@ async function openDrawer(id, evidenceRows, opener = document.activeElement) {
   $("incidents-view").classList.add("has-detail");
   renderIncidents();
   renderDrawer();
-  $("dr-close").focus();
+  if (snapshotDisclosures) window.scrollTo(0, workspaceScroll.get("incidents") || 0);
+  ((snapshotDisclosures && $("view-trigger-rows")) || $("dr-close")).focus();
 
   try {
     const response = await fetch(`/api/incidents/${encodeURIComponent(id)}`);
@@ -816,9 +825,10 @@ function renderDrawer() {
   const tableScroll = focusedTable >= 0 ? previousFocus.scrollLeft : 0;
   const summaries = [...body.querySelectorAll("summary")];
   const focusedSummary = summaries.includes(previousFocus) ? previousFocus.textContent : null;
-  const openDetails = new Set(body.dataset.incidentId === id
+  const openDetails = new Set(selection.snapshotDisclosures ?? (body.dataset.incidentId === id
     ? summaries.filter((summary) => summary.parentElement.open).map((summary) => summary.textContent)
-    : []);
+    : []));
+  selection.snapshotDisclosures = null;
   body.dataset.incidentId = id;
   const review = i.report_mode === "live" && status === "FLAGGED_FOR_REVIEW";
   const narrative = complete
@@ -830,6 +840,7 @@ function renderDrawer() {
       <p class="dashboard-label">Incident inspector</p>
       <h3 id="dr-title">Predicted: ${cls(i.attack_class)}</h3>
       <p class="hint">${esc(id)} · ${i.status === "open" ? "Open" : "Closed"}</p>
+      <p class="hint">${provenance} · ${esc(reportProgress(i))}</p>
     </div>
     ${matching.length ? '<button class="btn incident-evidence-action" type="button" id="view-trigger-rows">View trigger rows</button>' : ""}
     ${resultSections({
@@ -843,7 +854,7 @@ function renderDrawer() {
         ${["Command Flooding", "Data Injection"].includes(i.attack_class) ? '<p class="hint">Command Flooding and Data Injection can overlap, even at high model confidence.</p>' : ""}`,
       policy: `<p class="hint">Structured policy details are unavailable for this incident. Policy explanations describe simulated outcomes.</p>
         ${complete ? outputDetails("Policy explanation · AI-generated", i.mitigation) : ""}`,
-      narrative: `<p class="hint">${provenance}</p>${narrative || '<p class="hint">Narrative unavailable.</p>'}`,
+      narrative: narrative || '<p class="hint">Narrative unavailable.</p>',
     })}
     <details class="incident-properties"><summary>Incident properties</summary>
       <dl class="result-facts">

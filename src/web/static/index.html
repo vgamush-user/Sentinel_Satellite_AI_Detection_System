@@ -166,9 +166,11 @@
     <div class="incident-toolbar">
       <div class="card-head"><h2 id="incidents-heading" tabindex="-1">Incident queue</h2></div>
       <label>Find incident <input id="incident-search" type="search" placeholder="ID or attack class"></label>
+      <details class="queue-filters"><summary>Filters <span id="filter-count"></span></summary><div class="queue-filter-fields">
       <label>Attack class <select id="incident-class"><option value="">All classes</option></select></label>
       <label>Incident state <select id="incident-state"><option value="">Any state</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
       <label>Report state <select id="incident-report"><option value="">Any state</option><option value="queued">Queued</option><option value="running">Analysing</option><option value="ready">Ready</option><option value="error">Error</option></select></label>
+      </div></details>
       <button class="btn ghost" id="clear-filters" type="button" hidden>Clear filters</button>
     </div>
     <p class="queue-count" id="inc-count"></p>
@@ -181,7 +183,7 @@
   </aside>
   <aside class="drawer" id="drawer" hidden>
     <section class="drawer-panel" aria-labelledby="dr-title">
-      <button class="close" id="dr-close" type="button" aria-label="Close incident details">&times;</button>
+      <button class="close" id="dr-close" type="button" aria-label="Back to incidents or originating view">&times;</button>
       <div id="dr-body"></div>
     </section>
   </aside>
