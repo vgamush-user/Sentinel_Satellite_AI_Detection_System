@@ -60,22 +60,23 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { scrollbar-gutter: stable; }
 body {
+  --shell-gutter: 16px;
   background: var(--canvas);
   color: var(--text);
   font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   min-height: 100vh;
-  padding: clamp(16px, 10.55vh, 95px) 16px 30px;
+  padding: var(--shell-gutter);
 }
 .dashboard-shell {
   display: grid; grid-template-columns: 165px minmax(0, 1fr);
-  max-width: 1060px; min-height: 710px; margin-inline: auto;
+  min-height: calc(100vh - 2 * var(--shell-gutter));
+  min-height: calc(100dvh - 2 * var(--shell-gutter));
   background: var(--bg); border-radius: 22px; overflow: clip;
   box-shadow: 0 24px 62px #26334322;
 }
 .workspace { min-width: 0; padding: 13px; }
-body:has(.wide-workspace:not([hidden])) { padding-top: 24px; }
-.dashboard-shell:has(.wide-workspace:not([hidden])) { max-width: 1480px; }
 a { color: var(--accent); }
 h1, h2 { margin: 0; }
 small, .hint { color: var(--muted); }
@@ -373,14 +374,15 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 }
 
 @media (max-width: 720px) {
-  body { padding: 8px; }
-  .dashboard-shell { grid-template-columns: minmax(0, 1fr); border-radius: 14px; min-height: 0; }
+  html { scrollbar-gutter: auto; }
+  body { --shell-gutter: 8px; }
+  .dashboard-shell { grid-template-columns: minmax(0, 1fr); border-radius: 14px; }
   .workspace { padding: 10px; }
   .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0 4px 8px; }
   .workspace-nav { display: flex; flex-wrap: wrap; }
   .workspace-nav .btn { gap: 5px; padding-inline: 6px; }
-  .top, .grid { padding-inline: 12px; }
+  .top { padding-inline: 12px; }
   .features { grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr)); }
   #evidence-row { min-height: 44px; }
 
@@ -485,7 +487,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
 #card-tracker .tracker li > span:last-child { grid-column: 1 / -1; }
 #card-tracker .tracker li > span:empty { display: none; }
 @media (max-width: 720px) {
-  .intro-view { padding: 12px; }
   .sidebar { padding-block: 8px; }
   .brand { padding-bottom: 4px; }
 
@@ -654,7 +655,6 @@ label.radio input[type=number] { width: 58px; padding: 3px 6px; }
   .top h1 { font-size: 19px; }
   .top .btn { font-size: 13px; }
   #overview-view, #live-view, #incidents-view, #lab-view { padding: 0; gap: 10px; }
-  body:has(.wide-workspace:not([hidden])) { padding-top: 8px; }
   #live-view:not(.is-snapshot) .inspector-guide { display: none; }
   #live-view:not(.is-snapshot) .inspector-facts { margin-bottom: 0; }
   #live-view:not(.is-snapshot) .telemetry-inspector { grid-template-columns: minmax(0, 1fr); }
