@@ -1,7 +1,21 @@
-.env
-.venv/
-__pycache__/
-*.pyc
 chroma_sparta/
 # real-time pipeline: SQLite history + service logs
 data/live/
+# Python Virtual Environment
+venv/
+.venv/
+# Python Cache
+__pycache__/
+*.pyc
+.env
+frontend/node_modules/
+frontend/dist/
+.playwright-cli/
+.playwright-mcp/
+
+# Migration inputs and browser verification artifacts
+output/
+SentinelSat-Telemetry-Operations.zip
+**/node_modules/
+**/*.tsbuildinfo
+frontend/lib/*/dist/

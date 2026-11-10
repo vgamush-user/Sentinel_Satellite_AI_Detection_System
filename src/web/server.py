@@ -16,11 +16,10 @@ import time
 import uuid
 from collections import Counter, deque
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from streaming.config import (AGENT_MODE, BOOTSTRAP, CLASS_NAMES, DATASETS, FEATURE_ORDER, INCIDENT_CLOSE_GAP_ROWS,
@@ -28,8 +27,12 @@ from streaming.config import (AGENT_MODE, BOOTSTRAP, CLASS_NAMES, DATASETS, FEAT
                               TOPIC_REPORTS, TOPIC_SCORED, WEB_HOST, WEB_PORT, from_bytes, log, make_consumer)
 from streaming import inject, storage
 from streaming.topics import ensure_topics
+from web.analysis import router as analysis_router, stop_replay
+from ml.app import predict_anomaly
 
 STATIC = Path(__file__).resolve().parent / "static"
+FRONTEND = STATIC.parents[2] / "frontend" / "dist"
+DEMO_CACHE = STATIC.parents[1] / "pipeline" / "demo_cache.json"
 QUALITY = {"clean": "raw", "noisy": "noised"}  # UI name -> dataset key
 CHART_FEATURES = ("MessageRateInWindow", "AverageMessageLengthInWindow", "MemoryAnonMB")
 
@@ -49,6 +52,7 @@ class Bridge:
         self.rate_window = deque()               # timestamps of the last ~5 s of rows
         self.latency_ms = deque(maxlen=200)
         self.last_row_ts = 0.0
+        self.replay_dataset: str | None = None
         self.counts = Counter()                  # incidents opened, reports finished, ...
         self.kafka_ok = False
         self.stop = threading.Event()
@@ -78,6 +82,7 @@ class Bridge:
             "rows_per_sec": round(len(self.rate_window) / 5, 1),
             "accuracy": round(self.correct / self.labelled, 4) if self.labelled else None,
             "labelled": self.labelled,
+            "replay_dataset": self.replay_dataset,
             "pred_counts": dict(self.pred_counts),
             "latency_p50_ms": lat[len(lat) // 2] if lat else None,
             "last_row_age_sec": round(now - self.last_row_ts, 1) if self.last_row_ts else None,
@@ -121,6 +126,10 @@ class Bridge:
                 self.recent.append(row)
                 self.total_rows += 1
                 self.pred_counts[row["predicted_class"]] += 1
+                if row["source"] == "replay":
+                    dataset = msg.get("replay_dataset")
+                    self.replay_dataset = (PureWindowsPath(dataset).name or None
+                                           if isinstance(dataset, str) else None)
                 if msg.get("true_label") is not None:
                     self.labelled += 1
                     self.correct += msg["predicted_label"] == msg["true_label"]
@@ -202,10 +211,12 @@ async def lifespan(app: FastAPI):
     yield
     task.cancel()
     bridge.stop.set()
+    stop_replay()
 
 
 app = FastAPI(title="Sentinel live monitor", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.include_router(analysis_router)
+app.post("/api/analysis/predict")(predict_anomaly)
 
 
 # --------------------------------------------------------------------------- #
@@ -213,7 +224,18 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # --------------------------------------------------------------------------- #
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    if not (FRONTEND / "index.html").is_file():
+        raise HTTPException(503, "Dashboard build missing. In frontend run: npx pnpm@10.26.1 install --frozen-lockfile, then npx pnpm@10.26.1 run build.")
+    return FileResponse(FRONTEND / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/assets/{filename:path}", include_in_schema=False)
+def frontend_asset(filename: str):
+    directory = (FRONTEND / "assets").resolve()
+    asset = (directory / filename).resolve()
+    if not asset.is_relative_to(directory) or not asset.is_file():
+        raise HTTPException(404, "asset not found")
+    return FileResponse(asset)
 
 
 @app.get("/api/state")
@@ -241,6 +263,14 @@ def incident(incident_id: str):
     if inc is None:
         raise HTTPException(404, "incident not found (the recorder may not have stored it yet)")
     return inc
+
+
+@app.get("/api/demo-scenarios")
+def demo_scenarios():
+    """Read-only precomputed walkthroughs. Does not invoke the agent worker."""
+    if not DEMO_CACHE.is_file():
+        raise HTTPException(503, "Cached scenarios are unavailable")
+    return FileResponse(DEMO_CACHE, media_type="application/json")
 
 
 @app.get("/api/sample")
@@ -333,6 +363,23 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         clients.discard(ws)
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def frontend_page(path: str):
+    """Serve public files and client routes without swallowing API/asset errors."""
+    if path.split("/", 1)[0] in {"api", "ws", "assets", "static"}:
+        raise HTTPException(404, "not found")
+    directory = FRONTEND.resolve()
+    asset = (directory / path).resolve()
+    if not asset.is_relative_to(directory):
+        raise HTTPException(404, "not found")
+    if asset.is_file():
+        return FileResponse(asset)
+    # Missing files must not return the HTML shell (including fonts and scripts).
+    if Path(path).suffix:
+        raise HTTPException(404, "asset not found")
+    return index()
 
 
 def main():

@@ -1,0 +1,17 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm --filter @workspace/sentinelsat dev",
+    "build": "pnpm run typecheck && pnpm --filter @workspace/sentinelsat build",
+    "typecheck": "tsc --build lib/api-client-react && pnpm --filter @workspace/sentinelsat typecheck",
+    "test": "pnpm --filter @workspace/sentinelsat test"
+  },
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3"
+  },
+  "packageManager": "pnpm@10.26.1"
+}
