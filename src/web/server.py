@@ -11,12 +11,19 @@ through streaming.inject, exactly like the CSV replay.
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import threading
 import time
 import uuid
 from collections import Counter, deque
 from contextlib import asynccontextmanager
 from pathlib import Path, PureWindowsPath
+
+# Ensure 'src' is in sys.path so modules like streaming, web, ml, tools can be imported
+SRC_DIR = Path(__file__).resolve().parent.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
