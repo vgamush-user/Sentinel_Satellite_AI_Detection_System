@@ -1,21 +1,38 @@
-FROM python:3.10-slim
+# -------------------------------------------------------------
+# Stage 1: Build the React frontend dashboard
+# -------------------------------------------------------------
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/frontend
 
+# Install pnpm
+RUN npm install -g pnpm@10.26.1
+
+# Copy frontend source and build
+COPY frontend/ ./
+RUN pnpm install --frozen-lockfile
+RUN pnpm run build
+
+# -------------------------------------------------------------
+# Stage 2: Python FastAPI backend + static frontend server
+# -------------------------------------------------------------
+FROM python:3.10-slim
 WORKDIR /app
 
-# 1. Copy and install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2. Copy the entire src folder so your imports work perfectly
+# Copy source code and data
 COPY src/ ./src/
+COPY data/ ./data/
 
-# 3. Expose Cloud Run's default port
-EXPOSE 8080
+# Copy compiled frontend assets from Stage 1
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# 4. Run your server (Choose ONE of the options below):
+# Ensure src is in Python path
+ENV PYTHONPATH=/app/src
+ENV PORT=10000
+EXPOSE 10000
 
-# OPTION A: If server.py uses FastAPI or Flask (Recommended for Web APIs)
-CMD ["uvicorn", "src.web.server:app", "--host", "0.0.0.0", "--port", "8080"]
-
-# OPTION B: If server.py is a standard, raw Python websocket/TCP script
-# CMD ["python", "src/web/server.py"]
+# Start server using Render's PORT environment variable
+CMD ["sh", "-c", "uvicorn src.web.server:app --host 0.0.0.0 --port ${PORT:-10000}"]
