@@ -36,4 +36,4 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SENTINELSAT_911A5 }}
           channelId: live
           projectId: sentinelsat-911a5
-          entryPoint: ./frontend
+        
