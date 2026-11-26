@@ -8,14 +8,14 @@ metrics section for the full video.
 ## Before recording
 - Run `python src/pipeline/generate_demo_cache.py` once beforehand so Demo Mode is fully
   populated (avoids live Groq calls/rate-limit risk during the actual recording).
-- Have `python src/dashboard/app.py` already running in a terminal, browser tab open and loaded.
+- Start the React dashboard as documented in the README and open Manual analysis.
 - Close other tabs/apps hitting the same Groq key, to avoid a rate-limit surprise on camera.
 
 ## Shot list
 
 **1. Live telemetry stream (15s)**
-- Click Start on the dashboard. Point out the live table, rolling metric charts, and the
-  ground-truth label mix bar chart.
+- Click Start replay in Manual analysis. Point out the live table, rolling metric charts, and the
+  ground-truth label mix.
 - Say: "This is streaming real rows from the CuCD-ID dataset — CubeSat telemetry with
   realistic sensor noise, not a toy simulation."
 

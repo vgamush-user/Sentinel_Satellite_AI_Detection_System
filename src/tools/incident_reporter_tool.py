@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
+from tools.mitigation_tool import POLICY
 
 # Severity mapping derived from the finalized mitigation policy table
 # (docs/planning/cybersecurity_lead_complete_package.md sec 2) -- deterministic,
@@ -27,8 +28,18 @@ def compute_severity(class_name: str, action: str) -> str:
 def assess_false_positive_risk(class_name: str, confidence: float) -> dict:
     if class_name == "Normal":
         return {"fp_risk_score": "N/A", "risk_note": "No action taken; false positives not applicable to Normal classification."}
-    if confidence < 0.70:
-        return {"fp_risk_score": "HIGH", "risk_note": "Below guardrail threshold (0.70) -- flagged for review, not autonomously actioned."}
+    min_autonomous_threshold = 1.0
+    if class_name in POLICY:
+        active_thresholds = [
+            thresh for thresh, action, _, _ in POLICY[class_name]
+            if action not in ("log_only", "Escalate Alert")
+        ]
+        if active_thresholds:
+            min_autonomous_threshold = min(active_thresholds)
+        else:
+            min_autonomous_threshold = 0.0
+    if confidence < min_autonomous_threshold:
+        return {"fp_risk_score": "HIGH", "risk_note": f"Below guardrail threshold ({min_autonomous_threshold}) -- flagged for review, not autonomously actioned."}
     if class_name in ("Command Flooding", "Data Injection") and confidence < 0.85:
         return {"fp_risk_score": "MEDIUM", "risk_note": ("Command Flooding and Data Injection show significant mutual "
                 "confusion under domain shift (1,254+451 cross-errors in validation); confidence below 0.85 warrants caution.")}

@@ -25,7 +25,13 @@ def dummy_lookup(query:str)->str:
     Pretends to look something up and returns a fixed fake result.
     """
     return f"[dummy data] Result for '{query}':status=\"OK\",value=42"
-llm = LLM(model="groq/llama-3.3-70b-versatile")  # free tier model on Groq
+
+
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # src/, for agents.llm_config
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()  # free tier model on Groq
 
 agent = Agent(
     role="Hello World Agent",

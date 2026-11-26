@@ -1,0 +1,112 @@
+{
+  "onnx_export_verification": {
+    "onnx_vs_native_label_agreement": 1.0,
+    "native_accuracy_vs_true_label": 0.6890718896060538,
+    "native_macro_f1_vs_true_label": 0.6967130871997729,
+    "onnx_accuracy_vs_true_label": 0.6890718896060538,
+    "onnx_macro_f1_vs_true_label": 0.6967130871997729
+  },
+  "quantization_attempt": {
+    "attempted": true,
+    "succeeded": false,
+    "error_type": "ValueError",
+    "error_message": "Failed to find proper ai.onnx domain",
+    "explanation": "Architectural, not a bug in this script or an environment gap: XGBoost's ONNX export is one TreeEnsembleClassifier op (ai.onnx.ml domain) with all thresholds/leaf values stored as node attributes -- zero initializer tensors exist to quantize. Confirmed against ONNX Runtime's own quantization/registry.py: neither IntegerOpsRegistry (dynamic) nor QLinearOpsRegistry (static) lists TreeEnsemble* or any ai.onnx.ml op. See ONNX_QUANTIZATION_REPORT.md for the full writeup and what compression lever actually works for a tree ensemble instead."
+  },
+  "latency_benchmark": {
+    "xgboost_native": {
+      "single_row_ms_mean": 0.45922326799973234,
+      "batch_total_sec": 0.052283180000131324,
+      "batch_rows_per_sec": 429679.29647629644
+    },
+    "onnxruntime_fp32_opt_disabled": {
+      "single_row_ms_mean": 0.026972868000029848,
+      "batch_total_sec": 0.17659732299989628,
+      "batch_rows_per_sec": 127210.30884490359
+    },
+    "onnxruntime_fp32_opt_all": {
+      "single_row_ms_mean": 0.02784825799972168,
+      "batch_total_sec": 0.154735773000084,
+      "batch_rows_per_sec": 145182.97588488346
+    }
+  },
+  "model_size_comparison": {
+    "native_xgboost_json_bytes": 362584,
+    "onnx_fp32_bytes": 50777,
+    "onnx_vs_native_ratio": 0.1400420316395649
+  },
+  "round_count_tradeoff": [
+    {
+      "rounds": 10,
+      "rounds_pct_of_full": 6.7,
+      "accuracy": 0.48381927442688627,
+      "macro_f1": 0.4855771398441339,
+      "onnx_bytes": 10346,
+      "onnx_bytes_pct_of_full": 20.4
+    },
+    {
+      "rounds": 20,
+      "rounds_pct_of_full": 13.3,
+      "accuracy": 0.47028711328733586,
+      "macro_f1": 0.47517779324935827,
+      "onnx_bytes": 19922,
+      "onnx_bytes_pct_of_full": 39.2
+    },
+    {
+      "rounds": 30,
+      "rounds_pct_of_full": 20.0,
+      "accuracy": 0.646961940796795,
+      "macro_f1": 0.6500104347653494,
+      "onnx_bytes": 26772,
+      "onnx_bytes_pct_of_full": 52.7
+    },
+    {
+      "rounds": 35,
+      "rounds_pct_of_full": 23.3,
+      "accuracy": 0.6494101936345427,
+      "macro_f1": 0.652909483443447,
+      "onnx_bytes": 29492,
+      "onnx_bytes_pct_of_full": 58.1
+    },
+    {
+      "rounds": 40,
+      "rounds_pct_of_full": 26.7,
+      "accuracy": 0.6890718896060538,
+      "macro_f1": 0.6967130871997729,
+      "onnx_bytes": 30977,
+      "onnx_bytes_pct_of_full": 61.0
+    },
+    {
+      "rounds": 50,
+      "rounds_pct_of_full": 33.3,
+      "accuracy": 0.6890718896060538,
+      "macro_f1": 0.6967130871997729,
+      "onnx_bytes": 32777,
+      "onnx_bytes_pct_of_full": 64.6
+    },
+    {
+      "rounds": 75,
+      "rounds_pct_of_full": 50.0,
+      "accuracy": 0.6890718896060538,
+      "macro_f1": 0.6967130871997729,
+      "onnx_bytes": 37277,
+      "onnx_bytes_pct_of_full": 73.4
+    },
+    {
+      "rounds": 100,
+      "rounds_pct_of_full": 66.7,
+      "accuracy": 0.6890718896060538,
+      "macro_f1": 0.6967130871997729,
+      "onnx_bytes": 41777,
+      "onnx_bytes_pct_of_full": 82.3
+    },
+    {
+      "rounds": 150,
+      "rounds_pct_of_full": 100.0,
+      "accuracy": 0.6890718896060538,
+      "macro_f1": 0.6967130871997729,
+      "onnx_bytes": 50777,
+      "onnx_bytes_pct_of_full": 100.0
+    }
+  ]
+}

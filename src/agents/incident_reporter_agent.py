@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 from pathlib import Path
@@ -18,7 +19,9 @@ load_dotenv()
 
 from tools.incident_reporter_tool import AssembleIncidentRecordTool
 
-llm = LLM(model="groq/llama-3.3-70b-versatile")
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()
 
 incident_reporter_agent = Agent(
     role="Incident Reporter",
@@ -41,14 +44,17 @@ if __name__ == "__main__":
             "- SPARTA Analyst: tactic ST0009 / ST0003, technique SV-MA-1\n"
             "- Mitigation: action 'flush_command_queue + Rate Limit' via tool_rate_limit_uplink, "
             "guardrail note 'Keep emergency ground command channel unthrottled.', executed autonomously\n\n"
-            "Use assemble_incident_record to build the structured record, then write a short "
+                        "Use assemble_incident_record to build the structured record, then write a short "
             "human-reviewer report covering: what was detected and how confident the system was, "
             "the SPARTA threat context, what action was taken and why, the false-positive risk "
             "note, and that human review is still pending. Only use facts from the tool's output -- "
             "do not invent packet counts, timestamps beyond what the tool returned, or SHAP details "
-            "the tool didn't provide."
+            "the tool didn't provide.\n\n"
+            "CRITICAL FORMATTING INSTRUCTION: Write the report as a cohesive narrative paragraph "
+            "(or a few short paragraphs) that reads naturally to a human operator. DO NOT format it "
+            "as a JSON dump, bulleted list of fields, or key-value pairs."
         ),
-        expected_output="A short, clearly organized incident report a human reviewer could act on in under a minute.",
+        expected_output="A short, narrative incident report in paragraph form that a human reviewer could act on in under a minute.",
         agent=incident_reporter_agent,
     )
     crew = Crew(agents=[incident_reporter_agent], tasks=[task], verbose=True)

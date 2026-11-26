@@ -1,0 +1,9 @@
+# Only needed to reproduce deployment/onnx/export_and_benchmark.py.
+# Not part of the root requirements.txt — this is a standalone Week 5
+# stretch-goal benchmark, not something the live agent pipeline depends on.
+
+onnx
+onnxmltools
+skl2onnx
+onnxruntime
+sympy   # onnxruntime.quantization imports this at module load time

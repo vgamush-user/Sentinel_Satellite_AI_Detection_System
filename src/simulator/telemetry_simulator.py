@@ -76,6 +76,7 @@ class TelemetryReplaySimulator:
         self._order_mode: str = "sequential"
         self._loop: bool = True
         self._start_wall_time: Optional[float] = None
+        self._end_wall_time: Optional[float] = None  # set when playback finishes, freezes elapsed
         self._paused_accum: float = 0.0
         self._pause_started_at: Optional[float] = None
 
@@ -100,8 +101,8 @@ class TelemetryReplaySimulator:
 
     def start(self) -> None:
         """(Re)start playback from row 0 with current configuration."""
+        self._stop_and_join_thread()
         with self._lock:
-            self._stop_thread_locked()
             self._indices = (
                 list(range(self.total_rows))
                 if self._order_mode == "sequential"
@@ -115,11 +116,14 @@ class TelemetryReplaySimulator:
             self._paused_accum = 0.0
             self._pause_started_at = None
             self._start_wall_time = time.monotonic()
+            self._end_wall_time = None
             self._running = True
-            self._stop_event.clear()
-
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
+            # Fresh event per playback thread: clearing a shared event here
+            # would let the previous thread (not yet exited) keep running
+            # alongside the new one, doubling the emit rate.
+            self._stop_event = threading.Event()
+            self._thread = threading.Thread(target=self._run_loop, args=(self._stop_event,), daemon=True)
+            self._thread.start()
 
     def pause(self) -> None:
         with self._lock:
@@ -137,28 +141,34 @@ class TelemetryReplaySimulator:
 
     def stop(self) -> None:
         """Stop and reset playback entirely."""
+        self._stop_and_join_thread()
         with self._lock:
-            self._stop_thread_locked()
             self._cursor = 0
             self._rows_emitted = 0
             self._buffer.clear()
             self._running = False
             self._paused = False
             self._finished = False
+            self._start_wall_time = None
+            self._end_wall_time = None
+            self._paused_accum = 0.0
+            self._pause_started_at = None
 
-    def _stop_thread_locked(self) -> None:
-        self._stop_event.set()
-        t = self._thread
-        if t and t.is_alive():
-            # release lock while joining to avoid deadlocking the run loop
-            pass
-        self._running = False
+    def _stop_and_join_thread(self) -> None:
+        """Signal the current playback thread and wait for it to exit.
+        Joins outside the lock, since the run loop takes the lock itself."""
+        with self._lock:
+            self._stop_event.set()
+            self._running = False
+            t = self._thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2.0)
 
     # ------------------------------------------------------------------ #
     # Playback loop (background thread)
     # ------------------------------------------------------------------ #
-    def _run_loop(self) -> None:
-        while not self._stop_event.is_set():
+    def _run_loop(self, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
             with self._lock:
                 paused = self._paused
                 cursor = self._cursor
@@ -183,15 +193,18 @@ class TelemetryReplaySimulator:
                     with self._lock:
                         self._finished = True
                         self._running = False
+                        self._end_wall_time = time.monotonic()
                     return
 
             row = self.df.iloc[self._indices[cursor]]
             with self._lock:
+                if stop_event.is_set():  # stopped/restarted while we read the row
+                    return
                 self._buffer.append(row)
                 self._rows_emitted += 1
                 self._cursor += 1
 
-            time.sleep(1.0 / speed)
+            stop_event.wait(1.0 / speed)  # like sleep, but wakes at once on stop
 
     # ------------------------------------------------------------------ #
     # Read API
@@ -200,7 +213,7 @@ class TelemetryReplaySimulator:
         with self._lock:
             elapsed = 0.0
             if self._start_wall_time is not None:
-                now = time.monotonic()
+                now = self._end_wall_time if self._end_wall_time is not None else time.monotonic()
                 pause_time = self._paused_accum
                 if self._paused and self._pause_started_at is not None:
                     pause_time += now - self._pause_started_at

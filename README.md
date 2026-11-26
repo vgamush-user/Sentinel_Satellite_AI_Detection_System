@@ -1,3 +1,22 @@
+# Sentinel Satellite AI Detection System
+
+Real-time intrusion detection for satellite telemetry. Telemetry streams
+through **Apache Kafka**, an **XGBoost** model scores every row, attack bursts
+are grouped into **incidents**, and a crew of **4 AI agents** (CrewAI on Groq)
+maps each incident to SPARTA, picks the policy-mandated mitigation and writes
+an incident report. A live website shows all of it as it happens.
+
+**Quick start (real-time system):** start Docker Desktop, then
+```bash
+cd frontend
+npx pnpm@10.26.1 install --frozen-lockfile
+npx pnpm@10.26.1 run build
+cd ..
+python scripts/start_all.py --agents cached --open
+```
+Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.
+See [Real-time pipeline](#real-time-pipeline-kafka) below.
+
 ## Project Structure
 ``` 
 Sentinel_Satellite_AI_Detection_System/
@@ -6,6 +25,10 @@ Sentinel_Satellite_AI_Detection_System/
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
+├── docker-compose.yml                   # Kafka (KRaft) + Kafka UI for the real-time pipeline
+│
+├── scripts/
+│   └── start_all.py                     # one command: Kafka + every streaming service + website
 │
 ├── docs/
 │   ├── architecture.md                  # agent roster + data flow diagram
@@ -68,8 +91,21 @@ Sentinel_Satellite_AI_Detection_System/
 │   ├── pipeline/
 │   │   └── monitor_pipeline.py
 │   │
-│   ├── dashboard/
-│   │   └── app.py
+│   ├── streaming/                       # real-time Kafka pipeline
+│   │   ├── config.py                    # topics, guards, settings (all overridable via env)
+│   │   ├── topics.py                    # creates the 4 Kafka topics
+│   │   ├── producer.py                  # replays a CSV into telemetry.raw
+│   │   ├── inject.py                    # shared entry point (+ CLI) for new telemetry
+│   │   ├── detector.py                  # XGBoost on every row -> telemetry.scored
+│   │   ├── incident_manager.py          # groups attack rows into incidents
+│   │   ├── agent_worker.py              # 4-agent crew per incident -> reports
+│   │   ├── recorder.py                  # incidents + reports -> SQLite
+│   │   └── storage.py                   # SQLite schema + queries
+│   │
+│   ├── web/                             # live website (FastAPI + WebSocket)
+│   │   ├── analysis.py                  # Manual replay and agent analysis API
+│   │   ├── server.py
+│   │                                   # dashboard assets come from frontend/dist
 │   │
 │   └── reports/
 │       └── cybersecurity_lead_report.md
@@ -79,12 +115,12 @@ Sentinel_Satellite_AI_Detection_System/
 │   └── test_mitigation_boundaries.py
 │
 └── deployment/
-    ├── huggingface/                     # HF Spaces config, Week 5
     └── onnx/                            # stretch-goal quantization, Week 5
 
 
 
 ```
+
 ## Setup & Running — Agent Pipeline (Agentic AI Lead components)
 
 ### 1. Install dependencies
@@ -120,11 +156,11 @@ python src/pipeline/full_pipeline.py
 ```
 Streams rows from `data/noised/noised_dataset.csv`, gates them through the Monitor Agent (free), and runs the full Classifier → SPARTA Analyst → Mitigation → Incident Reporter chain (4 Groq calls) on whatever escalates. Capped at a small row count by default — each escalated row costs real API quota.
 
-### 6. Run the dashboard
-```bash
-python src/dashboard/app.py
-```
-Open the printed local URL. Click **Start** to stream telemetry live, **🔍 Run Full Agent Analysis** to manually trigger the agent pipeline on the latest row (costs 4 Groq calls), or use the **Demo Mode** buttons for instant, zero-cost cached examples.
+### 6. Open the React dashboard
+
+Build and launch the live dashboard using the streaming stack instructions below. In **Manual analysis**, select a dataset, start the shared CSV replay, and inspect the rolling metrics, recent rows, and Monitor result. **Run full agent analysis** uses the latest replay row at submission and requires live agent mode and a Groq API key. Overview has precomputed scenarios for cached mode.
+
+The **Five-feature packet test** uses the original Phase 4 predictor on the same FastAPI server. Place trusted copies of `telemetry_scaler.pkl` and `xgb_phase4_model.pkl` in a directory named by the `PHASE4_MODEL_DIR` environment variable. The predictor defaults to its current working directory, which is `src/` when launched by `scripts/start_all.py`. These artifacts are external to the repository. The standard Threat Lab uses the separate 22-feature model and works without them.
 
 ### 7. Regenerate the cached demo examples (only if you edit the agents/tools)
 ```bash
@@ -136,4 +172,86 @@ Costs ~4 Groq calls per class not already cached. Groq's free tier caps at 12,00
 ```bash
 python tests/test_monitor.py
 python tests/test_mitigation_boundaries.py
+```
+
+## Real-time pipeline (Kafka)
+
+```
+ CSV replay / website / API / CLI
+            │
+            ▼
+   telemetry.raw ──► Detector (XGBoost, every row) ──► telemetry.scored ──► website (live chart)
+                                                              │
+                                                              ▼
+                                         Incident manager (false-alarm guards)
+                                                              │
+                                                              ▼
+                     incidents ──► Agent worker (4 CrewAI agents on Groq, one per incident) ──► reports
+                         │                                                                       │
+                         └──────────────► Recorder ──► SQLite history ◄──────────────────────────┘
+```
+
+Each box is a separate process; they only talk through Kafka topics. Detection
+is milliseconds per row and never waits for the LLM. Groq is called **once per
+incident**, not per row, so its cost grows with the number of attacks, not the
+volume of telemetry. If several incidents open at once they queue in Kafka.
+
+### Run it
+Requires Node.js 22.12+ (tested with 22.23.2), Docker Desktop (running), and `GROQ_API_KEY` in `.env` for live agents. The live dashboard is the imported Replit React 19 / TypeScript / Tailwind 4 / Wouter application. Its pnpm workspace lives in `frontend/`, with the app in `frontend/artifacts/sentinelsat/`. Build it from the repository root before starting the Python stack.
+
+```bash
+cd frontend
+npx pnpm@10.26.1 install --frozen-lockfile
+npx pnpm@10.26.1 run typecheck
+npx pnpm@10.26.1 test
+npx pnpm@10.26.1 run build
+cd ..
+```
+```bash
+pip install -r requirements.txt
+python scripts/start_all.py --open                 # live agents on Groq
+python scripts/start_all.py --agents cached        # offline demo: stored reports, no Groq calls
+python scripts/start_all.py --speed 20 --mode all  # replay every row (attacks come as long blocks)
+```
+
+FastAPI serves the production dashboard at `http://127.0.0.1:8050` by default. Rebuild after frontend changes. For frontend development with hot reload, leave the Python stack running and start Vite in a second terminal.
+
+```bash
+cd frontend
+npx pnpm@10.26.1 run dev
+```
+
+Open the URL printed by Vite. It proxies `/api` and `/ws` to FastAPI and reads `WEB_PORT` from the environment or the repository's `.env`.
+
+Use **Data source → Use Sample demo** for the separate deterministic browser demo. Local Threat Lab and Manual analysis use FastAPI; live agent analysis requires live mode and a Groq key.
+
+For the separate read-only HTTPS gateway, set `SENTINEL_DEPLOYMENT=gateway` plus server-only `SENTINEL_API_ORIGIN` and `SENTINEL_API_TOKEN` before running Vite. Never prefix secrets with `VITE_`. A static gateway build needs its own authenticated hosting proxy; Vite preview does not proxy API requests. See [Replit migration verification](docs/replit-migration.md).
+
+See the [dashboard migration checklist](docs/dashboard-migration.md) for view behavior and the browser API contract.
+`Ctrl+C` stops the services; `docker compose down` stops Kafka. Logs: `data/live/logs/`.
+
+### Sending new entries
+Every entry point writes to `telemetry.raw`, exactly like the replay:
+- **Website → Test a new entry:** load a real row (pick a class, clean or noisy), edit any of the 22 features, send once or as a burst, and follow it through detection → incident → AI report.
+- **Website → Launch an attack:** one click sends a burst of real attack rows.
+- **HTTP:** `POST /api/ingest` with `{"features": {...22 features...}, "count": 1}`.
+- **CLI:** `cd src && python -m streaming.inject --cls "Command Flooding" --count 15`
+
+### Incident rules (false-alarm guards)
+A row counts as attack evidence only if XGBoost predicts a non-Normal class with
+confidence ≥ 0.7. An incident opens when **5 of the last 20 rows** are evidence of
+the same class ("K of the last N", because attack rows arrive interleaved with
+normal traffic), and closes after 40 rows (or 30 s) without that class. The class
+always comes from XGBoost; the agents explain and respond, they don't re-decide it.
+
+Tuned on the datasets: 0 false incidents over 3 loops of the Normal replay;
+clean attack bursts open exactly one correct incident 100% of the time. On the
+noised dataset the model is ~69% accurate and many noisy attack rows stay below
+the confidence guard, so noisy bursts are caught only 17–48% of the time. The
+website lets you compare clean vs noisy attacks live. All thresholds can be
+changed with environment variables (see `src/streaming/config.py`).
+
+### 10. If Claude or any AI is used
+```
+Check Claude.MD and make sure that you don't co=author any of the commits
 ```

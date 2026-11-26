@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -17,7 +18,9 @@ load_dotenv()
 
 from tools.mitigation_tool import MitigationPolicyTool
 
-llm = LLM(model="groq/llama-3.3-70b-versatile")
+from agents.llm_config import make_llm  # retries Groq rate limits / network blips
+
+llm = make_llm()
 
 mitigation_agent = Agent(
     role="Mitigation",
