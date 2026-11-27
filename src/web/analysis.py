@@ -17,7 +17,16 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from simulator.telemetry_simulator import TelemetryReplaySimulator
-from streaming.config import AGENT_MODE, CLASS_NAMES, DATASETS, FEATURE_ORDER, log
+from streaming.config import AGENT_MODE, CLASS_NAMES, DATASETS, FEATURE_ORDER, log, resolve_dataset_path
+
+NOMINAL_STATS: dict = {}
+_stats_path = SRC_DIR / "ml" / "nominal_baseline_stats.json"
+if _stats_path.is_file():
+    try:
+        with open(_stats_path, encoding="utf-8") as _f:
+            NOMINAL_STATS = json.load(_f)
+    except Exception:
+        pass
 
 router = APIRouter(prefix="/api/analysis")
 replay_lock = Lock()
@@ -27,7 +36,7 @@ dataset = "noised"
 
 
 class ReplaySettings(BaseModel):
-    dataset: Literal["noised", "raw"] = "noised"
+    dataset: str = "noised"
     speed: int = Field(10, ge=1, le=200)
     order: Literal["sequential", "shuffled"] = "sequential"
     loop: bool = True
@@ -41,7 +50,8 @@ def live_available():
 def get_simulator():
     global simulator
     if simulator is None:
-        simulator = TelemetryReplaySimulator(str(DATASETS[dataset]), buffer_size=100)
+        csv_path = resolve_dataset_path(dataset)
+        simulator = TelemetryReplaySimulator(str(csv_path), buffer_size=100)
     return simulator
 
 
@@ -57,19 +67,70 @@ def snapshot():
 
 
 def window_for(row):
-    return {feature: float(row[feature]) for feature in FEATURE_ORDER}
+    if row is None:
+        return {}
+    res = {}
+    for feature in FEATURE_ORDER:
+        val = row.get(feature) if hasattr(row, "get") else getattr(row, feature, None)
+        if val is not None and not (isinstance(val, float) and (val != val)):
+            try:
+                res[feature] = float(val)
+                continue
+            except (ValueError, TypeError):
+                pass
+        res[feature] = float(NOMINAL_STATS.get(feature, {}).get("mean", 0.0))
+    if "MsgId" in row:
+        try:
+            res["MsgId"] = float(row["MsgId"])
+        except Exception:
+            res["MsgId"] = 0.0
+    elif "Seq" in row:
+        try:
+            res["MsgId"] = float(row["Seq"])
+        except Exception:
+            res["MsgId"] = 0.0
+    else:
+        res["MsgId"] = 0.0
+    return res
 
 
 def monitor_window(window):
-    from tools.monitor_tool import should_escalate
+    if not window or not NOMINAL_STATS:
+        return False
+    tripped = 0
+    for feature, value in window.items():
+        stat = NOMINAL_STATS.get(feature)
+        if not stat:
+            continue
+        mean = stat.get("mean", 0.0)
+        std = stat.get("std", 0.0)
+        if std == 0:
+            continue
+        try:
+            z = abs(float(value) - mean) / std
+            if z > 5.0:
+                tripped += 1
+        except (ValueError, TypeError):
+            continue
+    return tripped >= 1
 
-    return should_escalate(window)
+
+@router.get("/datasets")
+def list_available_datasets():
+    return {
+        "current": dataset,
+        "datasets": [
+            {"key": k, "name": Path(v).stem, "filename": Path(v).name, "path": str(v)}
+            for k, v in DATASETS.items()
+        ]
+    }
 
 
 @router.get("/replay")
 def replay():
     name, state = snapshot()
     buffer = state.buffer
+    last_window = window_for(state.last_row) if state.last_row is not None else None
     return {
         "dataset": name,
         "state": "paused" if state.paused else "running" if state.running else "finished" if state.finished else "stopped",
@@ -80,8 +141,9 @@ def replay():
         "order": state.order_mode,
         "loop": state.loop,
         "rows": json.loads(buffer.to_json(orient="records")),
-        "monitor": monitor_window(window_for(state.last_row)) if state.last_row is not None else None,
+        "monitor": monitor_window(last_window) if last_window else None,
         "live_available": live_available(),
+        "available_datasets": list(DATASETS.keys()),
     }
 
 
@@ -91,7 +153,8 @@ def control_replay(action: Literal["load", "configure", "start", "pause", "resum
     with replay_lock:
         current = get_simulator()
         if action == "load":
-            replacement = TelemetryReplaySimulator(str(DATASETS[settings.dataset]), buffer_size=settings.buffer_size)
+            csv_path = resolve_dataset_path(settings.dataset)
+            replacement = TelemetryReplaySimulator(str(csv_path), buffer_size=settings.buffer_size)
             current.stop()
             simulator = replacement
             dataset = settings.dataset
@@ -130,8 +193,9 @@ def analyze():
         confidence = classification.confidence
         policy = decide_mitigation(prediction, confidence)
         label = int(state.last_row.get("Label", -1))
+        msg_id = window.get("MsgId", state.rows_emitted)
         return {
-            "dataset": name, "row": state.rows_emitted, "message_id": window["MsgId"], "monitor": monitor,
+            "dataset": name, "row": state.rows_emitted, "message_id": msg_id, "monitor": monitor,
             "label": CLASS_NAMES[label] if 0 <= label < len(CLASS_NAMES) else None,
             "prediction": prediction, "confidence": confidence, "status": result["status"],
             "action": policy.get("action"), "guardrail": policy.get("guardrail_note"),

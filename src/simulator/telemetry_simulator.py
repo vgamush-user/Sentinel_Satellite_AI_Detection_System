@@ -18,14 +18,80 @@ Usage (standalone smoke test):
 
 from __future__ import annotations
 
+import argparse
+import os
 import random
+import sys
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 import pandas as pd
+
+
+def resolve_default_csv(csv_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Resolves any given CSV path or automatically discovers a default telemetry CSV.
+    Searches standard project directories (data/sample_demo_csvs, sample_telemetry_csvs,
+    data/noised, data/raw, and current working directory).
+    """
+    if csv_path:
+        p = Path(csv_path)
+        if p.is_file():
+            return p.resolve()
+        # Search relative to common locations
+        candidates = [
+            Path.cwd() / p,
+            Path(__file__).resolve().parents[2] / p,
+            Path(__file__).resolve().parents[2] / "data" / "sample_demo_csvs" / p,
+            Path(__file__).resolve().parents[2] / "data" / "sample_demo_csvs" / f"{p.name}.csv",
+            Path(__file__).resolve().parents[2] / "sample_telemetry_csvs" / p,
+            Path(__file__).resolve().parents[2] / "sample_telemetry_csvs" / f"{p.name}.csv",
+            Path(__file__).resolve().parents[2] / "data" / "noised" / p,
+            Path(__file__).resolve().parents[2] / "data" / "raw" / p,
+        ]
+        for c in candidates:
+            if c.is_file():
+                return c.resolve()
+        raise FileNotFoundError(f"Telemetry CSV file not found: {csv_path}")
+
+    # No path provided: resolve default CSV
+    env_ds = os.getenv("STREAM_DATASET") or os.getenv("TELEMETRY_CSV")
+    if env_ds:
+        try:
+            return resolve_default_csv(env_ds)
+        except FileNotFoundError:
+            pass
+
+    project_root = Path(__file__).resolve().parents[2]
+    preferred_defaults = [
+        project_root / "data" / "sample_demo_csvs" / "sample_demo_mixed_traffic.csv",
+        project_root / "sample_telemetry_csvs" / "sample_demo_mixed_traffic.csv",
+        project_root / "data" / "sample_demo_csvs" / "sample_demo_nominal.csv",
+        project_root / "data" / "noised" / "noised_dataset.csv",
+        project_root / "data" / "raw" / "consolidated_dataset_raw.csv",
+    ]
+    for pref in preferred_defaults:
+        if pref.is_file():
+            return pref.resolve()
+
+    # Search for any CSV in sample_demo_csvs or data/
+    for search_dir in [
+        project_root / "data" / "sample_demo_csvs",
+        project_root / "sample_telemetry_csvs",
+        project_root / "data" / "noised",
+        project_root / "data" / "raw",
+        Path.cwd(),
+    ]:
+        if search_dir.is_dir():
+            csvs = list(search_dir.glob("*.csv"))
+            if csvs:
+                return csvs[0].resolve()
+
+    raise FileNotFoundError("Could not find any telemetry CSV file in workspace.")
 
 
 @dataclass
@@ -47,16 +113,17 @@ class SimulatorSnapshot:
 
 class TelemetryReplaySimulator:
     """
-    Streams rows of a CSV file at a configurable rate on a background thread.
+    Streams rows of ANY CSV file at a configurable rate on a background thread.
 
     Thread-safety: all mutable state is guarded by self._lock. Public methods
-    are safe to call from the Gradio callback thread while the replay loop
+    are safe to call from the UI/FastAPI thread while the replay loop
     runs in its own daemon thread.
     """
 
-    def __init__(self, csv_path: str, buffer_size: int = 200):
-        self.csv_path = csv_path
-        self.df: pd.DataFrame = pd.read_csv(csv_path)
+    def __init__(self, csv_path: Optional[Union[str, Path]] = None, buffer_size: int = 200):
+        resolved = resolve_default_csv(csv_path)
+        self.csv_path = str(resolved)
+        self.df: pd.DataFrame = pd.read_csv(resolved)
         self.total_rows: int = len(self.df)
         self.buffer_size = buffer_size
 
@@ -239,17 +306,33 @@ class TelemetryReplaySimulator:
 
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(description="Sentinel Satellite Telemetry Replay Simulator")
+    parser.add_argument("csv_path", nargs="?", default=None, help="Path to any CSV file or dataset name (optional; defaults to sample demo mixed traffic)")
+    parser.add_argument("--speed", type=float, default=20.0, help="Rows per second (default: 20)")
+    parser.add_argument("--order", choices=["sequential", "shuffled"], default="sequential", help="Playback order")
+    parser.add_argument("--loop", action="store_true", help="Loop playback continuously")
+    parser.add_argument("--buffer", type=int, default=50, help="Buffer size (default: 50)")
+    args = parser.parse_args()
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "consolidated_dataset_raw.csv"
-    sim = TelemetryReplaySimulator(path, buffer_size=20)
-    sim.configure(speed_rows_per_sec=20, order_mode="sequential", loop=False)
+    sim = TelemetryReplaySimulator(args.csv_path, buffer_size=args.buffer)
+    sim.configure(speed_rows_per_sec=args.speed, order_mode=args.order, loop=args.loop)
     sim.start()
-    print(f"Streaming {sim.total_rows} rows from {path} ...")
-    while True:
-        snap = sim.snapshot()
-        print(f"\remitted={snap.rows_emitted}/{snap.total_rows} elapsed={snap.elapsed_sec:.1f}s", end="")
-        if snap.finished:
-            print("\nDone.")
-            break
-        time.sleep(0.2)
+    print(f"Streaming {sim.total_rows} rows from '{sim.csv_path}' at {args.speed:g} rows/s (mode={args.order}, loop={args.loop}) ...")
+    try:
+        while True:
+            snap = sim.snapshot()
+            last_id = None
+            if snap.last_row is not None:
+                if "MsgId" in snap.last_row:
+                    last_id = snap.last_row["MsgId"]
+                elif "Seq" in snap.last_row:
+                    last_id = snap.last_row["Seq"]
+            id_str = f" [last_id={last_id}]" if last_id is not None else ""
+            print(f"\remitted={snap.rows_emitted}/{snap.total_rows}{id_str} elapsed={snap.elapsed_sec:.1f}s", end="", flush=True)
+            if snap.finished:
+                print("\nPlayback complete.")
+                break
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        sim.stop()
+        print("\nSimulator stopped by user.")

@@ -60,9 +60,10 @@ export const exampleSchema = z.object({
 });
 export const examplesSchema = z.record(z.string(), exampleSchema);
 export const manualReplaySchema = z.object({
-  dataset: z.enum(['noised', 'raw']), state: z.enum(['stopped', 'running', 'paused', 'finished']),
+  dataset: z.string(), state: z.enum(['stopped', 'running', 'paused', 'finished']),
   total_rows: num, rows_emitted: num, elapsed: num, speed: num, order: z.string(), loop: z.boolean(),
   rows: z.array(z.record(z.string(), num.nullable())), monitor: z.boolean().nullable(), live_available: z.boolean(),
+  available_datasets: z.array(z.string()).optional(),
 });
 export const windowResultSchema = z.object({
   dataset: z.string(), row: num, message_id: num, monitor: z.boolean(), label: maybeText,
@@ -83,6 +84,6 @@ export type ManualReplay = z.infer<typeof manualReplaySchema>;
 export type WindowResult = z.infer<typeof windowResultSchema>;
 export type PacketResult = z.infer<typeof packetResultSchema>;
 export type ReplaySettings = {
-  dataset: 'noised' | 'raw'; speed: number; order: 'sequential' | 'shuffled'; loop: boolean; buffer_size: number;
+  dataset: string; speed: number; order: 'sequential' | 'shuffled'; loop: boolean; buffer_size: number;
 };
 export type ManualAction = 'load' | 'configure' | 'start' | 'pause' | 'resume' | 'stop';

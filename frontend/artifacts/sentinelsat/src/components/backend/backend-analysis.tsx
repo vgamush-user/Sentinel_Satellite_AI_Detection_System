@@ -78,7 +78,48 @@ function ReplayWorkspace() {
         <div className="space-y-4 px-5 py-4">
           <p className="text-[12.5px] text-ink-3">Separate from the live stream and from the shell playback controls. Changes here only affect the backend's manual analysis replay.</p>
           <div className="grid gap-3 sm:grid-cols-3">
-            <div><Label htmlFor="r-ds">Dataset</Label><select id="r-ds" className={selectCls} value={cfg.dataset} onChange={(e) => setCfg((c) => ({ ...c, dataset: e.target.value === 'raw' ? 'raw' : 'noised' }))} data-testid="select-replay-dataset"><option value="noised">Noised telemetry</option><option value="raw">Raw simulated telemetry</option></select></div>
+            <div>
+              <Label htmlFor="r-ds">Dataset / CSV</Label>
+              <select
+                id="r-ds"
+                className={selectCls}
+                value={cfg.dataset}
+                onChange={(e) => setCfg((c) => ({ ...c, dataset: e.target.value }))}
+                data-testid="select-replay-dataset"
+              >
+                <optgroup label="Standard Datasets">
+                  <option value="noised">Noised telemetry (Default)</option>
+                  <option value="raw">Raw simulated telemetry</option>
+                </optgroup>
+                <optgroup label="Sample Demo Scenarios">
+                  <option value="sample_demo_mixed_traffic">Sample Demo: Mixed Traffic (Interleaved)</option>
+                  <option value="sample_demo_nominal">Sample Demo: Nominal Telemetry</option>
+                  <option value="sample_demo_command_flooding">Sample Demo: Command Flooding</option>
+                  <option value="sample_demo_data_injection">Sample Demo: Data Injection</option>
+                  <option value="sample_demo_storage_exhaustion">Sample Demo: Storage Exhaustion</option>
+                  <option value="sample_demo_defence_impairment">Sample Demo: Defence Impairment</option>
+                  <option value="sample_demo_bus_telemetry">Sample Demo: 5-Channel Bus Telemetry</option>
+                </optgroup>
+                {replay?.available_datasets?.filter(
+                  (d) =>
+                    ![
+                      'noised',
+                      'raw',
+                      'sample_demo_mixed_traffic',
+                      'sample_demo_nominal',
+                      'sample_demo_command_flooding',
+                      'sample_demo_data_injection',
+                      'sample_demo_storage_exhaustion',
+                      'sample_demo_defence_impairment',
+                      'sample_demo_bus_telemetry',
+                    ].includes(d)
+                ).map((d) => (
+                  <option key={d} value={d}>
+                    Custom: {d}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div><Label htmlFor="r-sp">Rows per second</Label><input id="r-sp" inputMode="numeric" className={inputCls(!(speed >= 1 && speed <= 200 && Number.isInteger(speed)))} value={cfg.speed} onChange={(e) => setCfg((c) => ({ ...c, speed: e.target.value }))} data-testid="input-replay-speed" /></div>
             <div><Label htmlFor="r-or">Order</Label><select id="r-or" className={selectCls} value={cfg.order} onChange={(e) => setCfg((c) => ({ ...c, order: e.target.value === 'shuffled' ? 'shuffled' : 'sequential' }))} data-testid="select-replay-order"><option value="sequential">Sequential</option><option value="shuffled">Shuffled</option></select></div>
             <div><Label htmlFor="r-bf">Buffer rows</Label><input id="r-bf" inputMode="numeric" className={inputCls(!(buffer >= 20 && buffer <= 500 && Number.isInteger(buffer)))} value={cfg.buffer} onChange={(e) => setCfg((c) => ({ ...c, buffer: e.target.value }))} data-testid="input-replay-buffer" /></div>

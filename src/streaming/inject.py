@@ -18,7 +18,7 @@ from functools import lru_cache
 import pandas as pd
 
 from streaming.config import (CLASS_NAMES, DATASETS, DEFAULT_DATASET, FEATURE_ORDER,
-                              SATELLITE_ID, TOPIC_RAW, log, make_producer, to_bytes)
+                              SATELLITE_ID, TOPIC_RAW, log, make_producer, resolve_dataset_path, to_bytes)
 
 _producer = None
 
@@ -30,11 +30,12 @@ def _get_producer():
     return _producer
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=16)
 def load_dataset(name: str = DEFAULT_DATASET) -> pd.DataFrame:
-    path = DATASETS.get(name, name)
+    path = resolve_dataset_path(name)
     df = pd.read_csv(path)
-    df["Label"] = df["Label"].astype(int)
+    if "Label" in df.columns:
+        df["Label"] = pd.to_numeric(df["Label"], errors="coerce").fillna(0).astype(int)
     return df.reset_index(drop=True)
 
 

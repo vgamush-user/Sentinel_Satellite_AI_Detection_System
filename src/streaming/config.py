@@ -39,10 +39,52 @@ ALL_TOPICS = (TOPIC_RAW, TOPIC_SCORED, TOPIC_INCIDENTS, TOPIC_REPORTS)
 # --------------------------------------------------------------------------- #
 # Data
 # --------------------------------------------------------------------------- #
-DATASETS = {
+DATASETS: dict[str, Path] = {
     "noised": PROJECT_ROOT / "data" / "noised" / "noised_dataset.csv",
     "raw": PROJECT_ROOT / "data" / "raw" / "consolidated_dataset_raw.csv",
 }
+SAMPLES_DIR = PROJECT_ROOT / "data" / "sample_demo_csvs"
+if SAMPLES_DIR.is_dir():
+    for _p in SAMPLES_DIR.glob("*.csv"):
+        DATASETS[_p.stem] = _p
+
+ALT_SAMPLES_DIR = PROJECT_ROOT / "sample_telemetry_csvs"
+if ALT_SAMPLES_DIR.is_dir():
+    for _p in ALT_SAMPLES_DIR.glob("*.csv"):
+        if _p.stem not in DATASETS:
+            DATASETS[_p.stem] = _p
+
+
+def resolve_dataset_path(name_or_path: str | Path | None = None) -> Path:
+    """Resolve any dataset name, key, or file path to an existing CSV file."""
+    if not name_or_path:
+        name_or_path = DEFAULT_DATASET
+    name_str = str(name_or_path).strip()
+    if name_str in DATASETS:
+        return Path(DATASETS[name_str])
+    p = Path(name_str)
+    if p.is_file():
+        return p.resolve()
+    for candidate in [
+        PROJECT_ROOT / p,
+        SAMPLES_DIR / p,
+        SAMPLES_DIR / f"{p.name}.csv",
+        ALT_SAMPLES_DIR / p,
+        ALT_SAMPLES_DIR / f"{p.name}.csv",
+        PROJECT_ROOT / "data" / "noised" / p,
+        PROJECT_ROOT / "data" / "raw" / p,
+    ]:
+        if candidate.is_file():
+            return candidate.resolve()
+    # Fallback to noised or any available CSV if file does not exist
+    if "noised" in DATASETS and DATASETS["noised"].is_file():
+        return DATASETS["noised"]
+    for v in DATASETS.values():
+        if v.is_file():
+            return v
+    raise FileNotFoundError(f"Telemetry CSV dataset not found: {name_or_path}")
+
+
 # Noised is the realistic one (the model is ~69% accurate on it); raw is clean
 # simulated data where the model is ~100% accurate, which looks too perfect.
 DEFAULT_DATASET = os.getenv("STREAM_DATASET", "noised")
