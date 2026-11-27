@@ -1,12 +1,24 @@
 # Sentinel Satellite AI Detection System
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://sentinel-satellite-ai-detection-system.onrender.com/)
+[![FastAPI](https://img.shields.io/badge/API%20Docs-Swagger-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://sentinel-satellite-ai-detection-system.onrender.com/docs)
+
 Real-time intrusion detection for satellite telemetry. Telemetry streams
 through **Apache Kafka**, an **XGBoost** model scores every row, attack bursts
 are grouped into **incidents**, and a crew of **4 AI agents** (CrewAI on Groq)
 maps each incident to SPARTA, picks the policy-mandated mitigation and writes
 an incident report. A live website shows all of it as it happens.
 
-**Quick start (real-time system):** start Docker Desktop, then
+---
+
+### 🌐 Live Deployment
+* **Interactive Dashboard:** [https://sentinel-satellite-ai-detection-system.onrender.com/](https://sentinel-satellite-ai-detection-system.onrender.com/)
+* **Interactive API Swagger UI:** [https://sentinel-satellite-ai-detection-system.onrender.com/docs](https://sentinel-satellite-ai-detection-system.onrender.com/docs)
+* **System Health & Telemetry State:** [https://sentinel-satellite-ai-detection-system.onrender.com/api/state](https://sentinel-satellite-ai-detection-system.onrender.com/api/state)
+
+---
+
+**Quick start (local real-time system):** start Docker Desktop, then
 ```bash
 cd frontend
 npx pnpm@10.26.1 install --frozen-lockfile
@@ -14,7 +26,7 @@ npx pnpm@10.26.1 run build
 cd ..
 python scripts/start_all.py --agents cached --open
 ```
-Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.
+Local Website: http://127.0.0.1:8050 · Kafka UI: http://localhost:8081.  
 See [Real-time pipeline](#real-time-pipeline-kafka) below.
 
 ## Project Structure
@@ -250,6 +262,27 @@ noised dataset the model is ~69% accurate and many noisy attack rows stay below
 the confidence guard, so noisy bursts are caught only 17–48% of the time. The
 website lets you compare clean vs noisy attacks live. All thresholds can be
 changed with environment variables (see `src/streaming/config.py`).
+
+---
+
+## 🚀 Cloud Deployment (Render)
+
+The application is deployed on Render as a unified Docker Web Service:
+* **Live Dashboard:** [https://sentinel-satellite-ai-detection-system.onrender.com/](https://sentinel-satellite-ai-detection-system.onrender.com/)
+* **API Documentation:** [https://sentinel-satellite-ai-detection-system.onrender.com/docs](https://sentinel-satellite-ai-detection-system.onrender.com/docs)
+
+### Deployment Architecture
+The root `Dockerfile` uses a multi-stage build:
+1. **Frontend Builder (`node:22-slim`)**: Installs dependencies with `pnpm` and builds the React 19 / Vite dashboard into `/app/frontend/dist`.
+2. **Backend Runtime (`python:3.10-slim`)**: Installs Python requirements, copies the backend code (`src/`) and compiled static assets, and runs `uvicorn` dynamically on `$PORT`.
+
+### Environment Variables
+Configure these in the Render Web Service Environment settings as needed:
+* `PORT`: Automatically set by Render.
+* `PYTHONPATH`: Defaulted to `/app/src`.
+* `KAFKA_BOOTSTRAP`: Point to a managed cloud Kafka cluster (e.g. Upstash, Aiven, or Confluent Cloud).
+* `GROQ_API_KEY`: Required for live 4-agent CrewAI incident reports.
+* `AGENT_MODE`: `live` (runs CrewAI agents via Groq) or `cached` (uses precomputed incident responses).
 
 ### 10. If Claude or any AI is used
 ```
