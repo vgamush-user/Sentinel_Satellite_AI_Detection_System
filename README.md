@@ -284,7 +284,4 @@ Configure these in the Render Web Service Environment settings as needed:
 * `GROQ_API_KEY`: Required for live 4-agent CrewAI incident reports.
 * `AGENT_MODE`: `live` (runs CrewAI agents via Groq) or `cached` (uses precomputed incident responses).
 
-### 10. If Claude or any AI is used
-```
-Check Claude.MD and make sure that you don't co=author any of the commits
-```
+
